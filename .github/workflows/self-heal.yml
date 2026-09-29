@@ -62,12 +62,14 @@ jobs:
           permission-checks: read
 
       - name: Update stale auto-merge branches
+        if: ${{ always() && steps.app-token.outcome == 'success' }}
         uses: frasermolyneux/actions/stale-branch-sweep@stale-branch-sweep/v1
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           repository: ${{ github.repository_owner }}/${{ matrix.repo }}
 
       - name: Delegate failed checks to Copilot
+        if: ${{ always() && steps.app-token.outcome == 'success' }}
         uses: frasermolyneux/actions/delegate-failed-checks@delegate-failed-checks/v1
         with:
           github-token: ${{ steps.app-token.outputs.token }}
