@@ -60,6 +60,8 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-checks: read
+          permission-actions: write
+          permission-issues: write
 
       - name: Update stale auto-merge branches
         if: ${{ always() && steps.app-token.outcome == 'success' }}
@@ -75,3 +77,12 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
           mention-token: ${{ secrets.COPILOT_AGENT_PAT }}
           repository: ${{ github.repository_owner }}/${{ matrix.repo }}
+
+      - name: Release pending Copilot workflow runs
+        if: ${{ always() && steps.app-token.outcome == 'success' }}
+        uses: frasermolyneux/actions/approve-copilot-workflow-runs@approve-copilot-workflow-runs/v1
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          copilot-token: ${{ secrets.COPILOT_AGENT_PAT }}
+          repository: ${{ github.repository_owner }}/${{ matrix.repo }}
+          bot-login: ${{ steps.app-token.outputs.app-slug }}[bot]
