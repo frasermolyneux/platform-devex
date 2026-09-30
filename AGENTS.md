@@ -41,6 +41,14 @@ There is no local build or test suite; validation is limited to workflow linting
 - Mint a fresh, repository-scoped installation token per target repository
   (`actions/create-github-app-token` with `repositories: <name>`) rather than reusing one broad
   token across the matrix — least privilege per job.
+- `secrets.COPILOT_MENTION_PAT` is a fine-grained personal access token from a human account
+  (not the GitHub App), set directly on this repository with `gh secret set` — **never** via
+  `platform-workloads` Terraform, which must never manage credentials. It is passed only to
+  `delegate-failed-checks`' `mention-token` input, because GitHub's Copilot coding agent ignores
+  `@copilot` mentions authored by a GitHub App/bot identity and only acts on mentions from a real
+  user with write access and Copilot entitlement. Every other step continues to use the GitHub
+  App token. If this secret is ever rotated or revoked, delegation comments still post (via the
+  `github-token` fallback) but Copilot will not act on them until it is restored.
 - Composite actions are referenced by folder-scoped release tags from `actions`
   (e.g. `frasermolyneux/actions/stale-branch-sweep@stale-branch-sweep/v1`). Bump the tag deliberately
   when adopting a new major/minor version; do not float on `main`.
