@@ -42,10 +42,13 @@ gh secret set COPILOT_MENTION_PAT --repo frasermolyneux/platform-devex
 ```
 
 Use a fine-grained PAT scoped to the target repositories with only the `Pull requests: Read and
-write` and `Issues: Read and write` permissions, owned by an account that has Copilot entitlement
-and write access to those repositories. Rotate it like any other credential; if it is missing or
-revoked, `delegate-failed-checks` still runs and posts comments (falling back to the GitHub App
-token), but Copilot will not act on them until the PAT is restored.
+write` permission (GitHub treats `POST .../issues/{n}/comments` as a pull requests permission,
+not an issues one) — owned by an account that has Copilot entitlement and write access to those
+repositories. Rotate it like any other credential; if the secret is missing (empty),
+`delegate-failed-checks` falls back to the GitHub App token and still posts comments, but Copilot
+will not act on them. If the PAT is instead revoked or expired (a non-empty but invalid value),
+the fallback does not apply: the action's `gh api user` lookup fails and the step aborts, so
+remove or replace the secret rather than leaving a revoked value in place.
 
 ## Running manually
 

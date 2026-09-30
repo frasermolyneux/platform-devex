@@ -47,8 +47,10 @@ There is no local build or test suite; validation is limited to workflow linting
   `delegate-failed-checks`' `mention-token` input, because GitHub's Copilot coding agent ignores
   `@copilot` mentions authored by a GitHub App/bot identity and only acts on mentions from a real
   user with write access and Copilot entitlement. Every other step continues to use the GitHub
-  App token. If this secret is ever rotated or revoked, delegation comments still post (via the
-  `github-token` fallback) but Copilot will not act on them until it is restored.
+  App token. If this secret is ever removed (empty), delegation comments still post (via the
+  `github-token` fallback) but Copilot will not act on them. If it is instead revoked or expired
+  rather than removed, the fallback does not apply — the action's `gh api user` lookup fails and
+  the step aborts — so replace or delete the secret rather than leaving a revoked value in place.
 - Composite actions are referenced by folder-scoped release tags from `actions`
   (e.g. `frasermolyneux/actions/stale-branch-sweep@stale-branch-sweep/v1`). Bump the tag deliberately
   when adopting a new major/minor version; do not float on `main`.
