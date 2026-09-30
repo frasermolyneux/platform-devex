@@ -15,7 +15,7 @@ against each one:
   checks.
 - **approve-copilot-workflow-runs** — releases Actions workflow runs stuck awaiting approval
   because they were triggered by a Copilot coding agent commit, after a deterministic CI-file
-  allowlist check and an automated Copilot CLI risk review; anything ambiguous is left pending.
+  denylist check and an automated Copilot CLI risk review; anything ambiguous is left pending.
 
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.

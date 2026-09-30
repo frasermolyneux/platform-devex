@@ -18,7 +18,7 @@ Internal developer platform automation: scheduled workflows for PR self-healing,
      failing commit SHA, so Copilot can pick up the fix.
    - [`approve-copilot-workflow-runs`](https://github.com/frasermolyneux/actions/tree/main/approve-copilot-workflow-runs) —
      finds Actions workflow runs stuck awaiting approval because they were triggered by a Copilot
-     coding agent commit, and releases the ones that pass a deterministic CI-file allowlist plus an
+     coding agent commit, and releases the ones that pass a deterministic CI-file denylist plus an
      automated Copilot CLI risk review. Anything touching workflow/action/Dockerfile/CODEOWNERS
      files, or that the CLI review doesn't clearly approve, is left pending for a human.
 
