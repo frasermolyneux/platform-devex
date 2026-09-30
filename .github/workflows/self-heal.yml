@@ -78,6 +78,7 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
           mention-token: ${{ secrets.COPILOT_AGENT_PAT }}
           repository: ${{ github.repository_owner }}/${{ matrix.repo }}
+          trusted-bot-login: ${{ steps.app-token.outputs.app-slug }}[bot]
 
       - name: Release pending Copilot workflow runs
         id: approve-copilot-workflow-runs
