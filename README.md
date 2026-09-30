@@ -54,12 +54,11 @@ gh secret set COPILOT_AGENT_PAT --repo frasermolyneux/platform-devex
 Use a fine-grained PAT scoped to the target repositories, owned by an account that has Copilot
 entitlement and write access to those repositories, with:
 
-- `Pull requests: Read and write` (GitHub treats `POST .../issues/{n}/comments` as a pull
-  requests permission, not an issues one) — used by `delegate-failed-checks` to post the
-  delegation comment as a human.
-- `Copilot agent settings: Read` (account-level; the current token-creation UI's label for what
-  authorizes Copilot CLI/API auth) — used by `approve-copilot-workflow-runs` to run the CLI risk
-  review.
+- Repository permissions — `Pull requests: Read and write` (GitHub treats
+  `POST .../issues/{n}/comments` as a pull requests permission, not an issues one) — used by
+  `delegate-failed-checks` to post the delegation comment as a human.
+- Account permissions — `Copilot Requests: Read` — used by `approve-copilot-workflow-runs` to
+  authenticate the CLI risk review.
 
 Rotate it like any other credential; if the secret is missing (empty), `delegate-failed-checks`
 falls back to the GitHub App token and still posts comments, but Copilot will not act on them,
