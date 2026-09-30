@@ -38,7 +38,7 @@ git diff --check
 - Do not hard-code target repository names — the list must come from the GitHub App
   installation so newly onboarded repositories are automatically covered.
 - Do not commit secrets, tokens, or private keys. `GH_APP_PEM` is an Actions secret managed by
-  `platform-workloads`, not repository content. `COPILOT_MENTION_PAT` is a fine-grained personal
+  `platform-workloads`, not repository content. `COPILOT_AGENT_PAT` is a fine-grained personal
   access token set directly on this repository (never via `platform-workloads`, which must never
   manage credentials); it exists solely so `delegate-failed-checks` can post `@copilot` mentions
   that Copilot's coding agent will actually act on (mentions from the GitHub App/bot identity are

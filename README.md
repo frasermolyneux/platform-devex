@@ -30,7 +30,7 @@ GitHub's Copilot coding agent only acts on `@copilot` mentions posted by a real 
 write access and Copilot entitlement — it silently ignores mentions authored by a GitHub App or
 other bot identity. Since `self-heal.yml` otherwise runs entirely on the shared GitHub App's
 installation tokens, the `delegate-failed-checks` step alone is also given a fine-grained
-personal access token (`secrets.COPILOT_MENTION_PAT`) so the delegation comment is authored by a
+personal access token (`secrets.COPILOT_AGENT_PAT`) so the delegation comment is authored by a
 human account and Copilot actually responds to it. Everything else — discovery, `stale-branch-sweep`,
 and the read-only lookups inside `delegate-failed-checks` — continues to use the GitHub App token.
 
@@ -38,7 +38,7 @@ and the read-only lookups inside `delegate-failed-checks` — continues to use t
 Terraform. Set it directly as a repository secret:
 
 ```pwsh
-gh secret set COPILOT_MENTION_PAT --repo frasermolyneux/platform-devex
+gh secret set COPILOT_AGENT_PAT --repo frasermolyneux/platform-devex
 ```
 
 Use a fine-grained PAT scoped to the target repositories with only the `Pull requests: Read and

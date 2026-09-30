@@ -41,7 +41,7 @@ There is no local build or test suite; validation is limited to workflow linting
 - Mint a fresh, repository-scoped installation token per target repository
   (`actions/create-github-app-token` with `repositories: <name>`) rather than reusing one broad
   token across the matrix — least privilege per job.
-- `secrets.COPILOT_MENTION_PAT` is a fine-grained personal access token from a human account
+- `secrets.COPILOT_AGENT_PAT` is a fine-grained personal access token from a human account
   (not the GitHub App), set directly on this repository with `gh secret set` — **never** via
   `platform-workloads` Terraform, which must never manage credentials. It is passed only to
   `delegate-failed-checks`' `mention-token` input, because GitHub's Copilot coding agent ignores

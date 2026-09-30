@@ -73,5 +73,5 @@ jobs:
         uses: frasermolyneux/actions/delegate-failed-checks@delegate-failed-checks/v1
         with:
           github-token: ${{ steps.app-token.outputs.token }}
-          mention-token: ${{ secrets.COPILOT_MENTION_PAT }}
+          mention-token: ${{ secrets.COPILOT_AGENT_PAT }}
           repository: ${{ github.repository_owner }}/${{ matrix.repo }}
