@@ -18,9 +18,21 @@ Internal developer platform automation: scheduled workflows for PR self-healing,
      failing commit SHA, so Copilot can pick up the fix.
    - [`approve-copilot-workflow-runs`](https://github.com/frasermolyneux/actions/tree/main/approve-copilot-workflow-runs) —
      finds Actions workflow runs stuck awaiting approval because they were triggered by a Copilot
-     coding agent commit, and releases the ones that pass a deterministic CI-file denylist plus an
-     automated Copilot CLI risk review. Anything touching workflow/action/Dockerfile/CODEOWNERS
-     files, or that the CLI review doesn't clearly approve, is left pending for a human.
+     coding agent commit, or by a Dependabot pull request (recorded as actor `github-actions[bot]`,
+     only trusted here when its pull request author is `dependabot[bot]`), and releases the ones
+     that pass a deterministic CI-file denylist plus an automated Copilot CLI risk review. Anything
+     touching workflow/action/Dockerfile/CODEOWNERS files, or that the CLI review doesn't clearly
+     approve, is left pending for a human.
+3. **Escalate instead of looping** — `delegate-failed-checks` caps delegation at 3 attempts per
+   pull request (across all commits, not just the current one). Once reached, it posts a one-time
+   "needs a human" comment instead of re-delegating indefinitely — this matters because some
+   failing checks are environmental (cloud credentials, Terraform provider auth) and no code
+   change from Copilot can fix them.
+4. **Summarize** — each sweep job writes a step summary row only for repositories where something
+   happened (a branch update, a delegation, an escalation, an approval, or a run left blocked), and
+   a final `summarize` job collects those into a single comment on a `platform-devex` tracking
+   issue titled "Self-heal activity log", so the outcome of a run is visible in one place instead
+   of only in scattered per-repository Action logs and PR comments. Quiet runs post nothing.
 
 ## Provisioning
 

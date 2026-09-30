@@ -63,6 +63,7 @@ jobs:
           permission-actions: write
 
       - name: Update stale auto-merge branches
+        id: stale-branch-sweep
         if: ${{ always() && steps.app-token.outcome == 'success' }}
         uses: frasermolyneux/actions/stale-branch-sweep@stale-branch-sweep/v1
         with:
@@ -70,6 +71,7 @@ jobs:
           repository: ${{ github.repository_owner }}/${{ matrix.repo }}
 
       - name: Delegate failed checks to Copilot
+        id: delegate-failed-checks
         if: ${{ always() && steps.app-token.outcome == 'success' }}
         uses: frasermolyneux/actions/delegate-failed-checks@delegate-failed-checks/v1
         with:
@@ -78,6 +80,7 @@ jobs:
           repository: ${{ github.repository_owner }}/${{ matrix.repo }}
 
       - name: Release pending Copilot workflow runs
+        id: approve-copilot-workflow-runs
         if: ${{ always() && steps.app-token.outcome == 'success' }}
         uses: frasermolyneux/actions/approve-copilot-workflow-runs@approve-copilot-workflow-runs/v1
         with:
@@ -85,3 +88,117 @@ jobs:
           copilot-token: ${{ secrets.COPILOT_AGENT_PAT }}
           repository: ${{ github.repository_owner }}/${{ matrix.repo }}
           bot-login: ${{ steps.app-token.outputs.app-slug }}[bot]
+          # github-actions[bot] is the actor GitHub records for a Dependabot
+          # pull request's pending action_required runs (Dependabot itself
+          # never appears as a run actor) - only trusted here when paired
+          # with dependabot[bot] as the pull request's own author, per
+          # extra-trusted-pr-authors.
+          extra-trusted-actors: "github-actions[bot]"
+          extra-trusted-pr-authors: "dependabot[bot]"
+
+      - name: Write per-repo activity summary
+        if: ${{ always() && steps.app-token.outcome == 'success' }}
+        shell: bash
+        env:
+          REPO: ${{ matrix.repo }}
+          UPDATED_COUNT: ${{ steps.stale-branch-sweep.outputs.updated_count }}
+          UPDATED_PRS: ${{ steps.stale-branch-sweep.outputs.updated_pull_requests }}
+          DELEGATED_COUNT: ${{ steps.delegate-failed-checks.outputs.delegated_count }}
+          DELEGATED_PRS: ${{ steps.delegate-failed-checks.outputs.delegated_pull_requests }}
+          ESCALATED_COUNT: ${{ steps.delegate-failed-checks.outputs.escalated_count }}
+          ESCALATED_PRS: ${{ steps.delegate-failed-checks.outputs.escalated_pull_requests }}
+          APPROVED_COUNT: ${{ steps.approve-copilot-workflow-runs.outputs.approved_count }}
+          APPROVED_PRS: ${{ steps.approve-copilot-workflow-runs.outputs.approved_pull_requests }}
+          BLOCKED_COUNT: ${{ steps.approve-copilot-workflow-runs.outputs.blocked_count }}
+        run: |
+          set -euo pipefail
+
+          TOTAL=$(( ${UPDATED_COUNT:-0} + ${DELEGATED_COUNT:-0} + ${ESCALATED_COUNT:-0} + ${APPROVED_COUNT:-0} + ${BLOCKED_COUNT:-0} ))
+
+          # Only a repo where the sweep actually did (or flagged) something
+          # gets a row - a clean sweep across dozens of quiet repos would
+          # otherwise bury the handful that matter in noise.
+          if [[ "$TOTAL" -eq 0 ]]; then
+            exit 0
+          fi
+
+          {
+            echo "| ${REPO} | ${UPDATED_COUNT:-0} (${UPDATED_PRS:-}) | ${DELEGATED_COUNT:-0} (${DELEGATED_PRS:-}) | ${ESCALATED_COUNT:-0} (${ESCALATED_PRS:-}) | ${APPROVED_COUNT:-0} (${APPROVED_PRS:-}) | ${BLOCKED_COUNT:-0} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          mkdir -p "${RUNNER_TEMP}/sweep-result"
+          jq -n \
+            --arg repo "$REPO" \
+            --argjson updated "${UPDATED_COUNT:-0}" \
+            --arg updated_prs "${UPDATED_PRS:-}" \
+            --argjson delegated "${DELEGATED_COUNT:-0}" \
+            --arg delegated_prs "${DELEGATED_PRS:-}" \
+            --argjson escalated "${ESCALATED_COUNT:-0}" \
+            --arg escalated_prs "${ESCALATED_PRS:-}" \
+            --argjson approved "${APPROVED_COUNT:-0}" \
+            --arg approved_prs "${APPROVED_PRS:-}" \
+            --argjson blocked "${BLOCKED_COUNT:-0}" \
+            '{repo: $repo, updated: $updated, updated_prs: $updated_prs, delegated: $delegated, delegated_prs: $delegated_prs, escalated: $escalated, escalated_prs: $escalated_prs, approved: $approved, approved_prs: $approved_prs, blocked: $blocked}' \
+            > "${RUNNER_TEMP}/sweep-result/${REPO}.json"
+
+      - name: Upload activity result
+        if: ${{ always() && steps.app-token.outcome == 'success' && hashFiles(format('{0}/sweep-result/*.json', runner.temp)) != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sweep-result-${{ matrix.repo }}
+          path: ${{ runner.temp }}/sweep-result/*.json
+          retention-days: 7
+
+  summarize:
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Download activity results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: sweep-result-*
+          path: results
+          merge-multiple: true
+
+      - name: Build and post activity summary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # No artifacts means every repo in this run was quiet - nothing
+          # to summarize or report.
+          if [[ ! -d results ]] || [[ -z "$(ls -A results 2>/dev/null)" ]]; then
+            echo "No repositories required attention this run."
+            exit 0
+          fi
+
+          {
+            echo "## Self-heal activity — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            echo "| Repo | Branches updated | Delegated | Escalated | Runs approved | Runs left blocked |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+            for f in results/*.json; do
+              jq -r '[.repo, (.updated | tostring) + " (" + .updated_prs + ")", (.delegated | tostring) + " (" + .delegated_prs + ")", (.escalated | tostring) + " (" + .escalated_prs + ")", (.approved | tostring) + " (" + .approved_prs + ")", (.blocked | tostring)] | "| " + join(" | ") + " |"' "$f"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY" > body.md
+
+          # Reuse a single open tracking issue across runs rather than
+          # opening a new one every 30 minutes - only the most recent
+          # activity needs to be visible at a glance.
+          ISSUE_NUM=$(gh issue list --repo "${{ github.repository }}" --search "Self-heal activity log in:title" --state open --json number --jq '.[0].number // empty')
+          if [[ -z "$ISSUE_NUM" ]]; then
+            ISSUE_NUM=$(gh issue create --repo "${{ github.repository }}" --title "Self-heal activity log" --body "Tracking issue for self-heal.yml activity summaries. Comments are added only for runs where at least one repository needed attention." --json number --jq '.number' 2>/dev/null) \
+              || gh issue create --repo "${{ github.repository }}" --title "Self-heal activity log" --body "Tracking issue for self-heal.yml activity summaries. Comments are added only for runs where at least one repository needed attention." | grep -oE '[0-9]+$'
+          fi
+
+          if [[ -n "$ISSUE_NUM" ]]; then
+            gh issue comment "$ISSUE_NUM" --repo "${{ github.repository }}" --body-file body.md
+          else
+            echo "::warning::could not resolve or create the self-heal activity log issue; summary is only available in this run's step summary"
+          fi
