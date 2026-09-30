@@ -41,8 +41,10 @@ entirely on the shared GitHub App's installation tokens, `delegate-failed-checks
 `approve-copilot-workflow-runs` are also given a fine-grained personal access token
 (`secrets.COPILOT_AGENT_PAT`) so the delegation comment is authored by a human account (and
 Copilot actually responds to it) and the CLI review call authenticates successfully. Everything
-else — discovery, `stale-branch-sweep`, and the read-only lookups and release call inside the
-other two steps — continues to use the GitHub App token.
+else — discovery, `stale-branch-sweep`, the read-only lookups inside the other two steps, the
+release call inside `approve-copilot-workflow-runs`, its audit comment (always posted via
+`github-token`, never the PAT), and `delegate-failed-checks`' own fallback comment when the PAT
+is absent — continues to use the GitHub App token.
 
 `platform-workloads` must never manage credentials, so this PAT is **not** provisioned through
 Terraform. Set it directly as a repository secret:

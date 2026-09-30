@@ -61,7 +61,6 @@ jobs:
           permission-pull-requests: write
           permission-checks: read
           permission-actions: write
-          permission-issues: write
 
       - name: Update stale auto-merge branches
         if: ${{ always() && steps.app-token.outcome == 'success' }}
