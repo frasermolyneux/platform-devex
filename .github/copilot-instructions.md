@@ -8,8 +8,8 @@ actions (from the `actions` repository) across every repository the shared frase
 GitHub App is installed on.
 
 - `.github/workflows/self-heal.yml` — discovers installation repositories, then runs
-  `stale-branch-sweep` and `delegate-failed-checks` per repository on a schedule and via
-  `workflow_dispatch`.
+  `stale-branch-sweep`, `delegate-failed-checks`, and `approve-copilot-workflow-runs` per
+  repository on a schedule and via `workflow_dispatch`.
 - The repository itself is provisioned by `platform-workloads`
   (`terraform/workloads/platform/platform-devex.json`); do not add Terraform to this repository.
 
@@ -40,6 +40,6 @@ git diff --check
 - Do not commit secrets, tokens, or private keys. `GH_APP_PEM` is an Actions secret managed by
   `platform-workloads`, not repository content. `COPILOT_AGENT_PAT` is a fine-grained personal
   access token set directly on this repository (never via `platform-workloads`, which must never
-  manage credentials); it exists solely so `delegate-failed-checks` can post `@copilot` mentions
-  that Copilot's coding agent will actually act on (mentions from the GitHub App/bot identity are
-  ignored).
+  manage credentials); it exists so `delegate-failed-checks` can post `@copilot` mentions that
+  Copilot's coding agent will actually act on (mentions from the GitHub App/bot identity are
+  ignored), and so `approve-copilot-workflow-runs` can authenticate its Copilot CLI risk review.

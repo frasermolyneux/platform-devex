@@ -13,6 +13,9 @@ against each one:
 - **delegate-failed-checks** — comments `@copilot investigate and resolve the failed checks on
   this pull request` once per failing commit SHA on open, non-draft pull requests with failing
   checks.
+- **approve-copilot-workflow-runs** — releases Actions workflow runs stuck awaiting approval
+  because they were triggered by a Copilot coding agent commit, after a deterministic CI-file
+  denylist check and an automated Copilot CLI risk review; anything ambiguous is left pending.
 
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.
@@ -20,7 +23,8 @@ The repository itself is provisioned through `platform-workloads` (catalog entry
 ## Important paths
 
 - `.github/workflows/self-heal.yml` — the scheduled orchestrator: discovers installation
-  repositories, then runs `stale-branch-sweep` and `delegate-failed-checks` per repository.
+  repositories, then runs `stale-branch-sweep`, `delegate-failed-checks`, and
+  `approve-copilot-workflow-runs` per repository.
 - `README.md` — repository overview and manual run instructions.
 
 ## Useful commands
@@ -43,14 +47,18 @@ There is no local build or test suite; validation is limited to workflow linting
   token across the matrix — least privilege per job.
 - `secrets.COPILOT_AGENT_PAT` is a fine-grained personal access token from a human account
   (not the GitHub App), set directly on this repository with `gh secret set` — **never** via
-  `platform-workloads` Terraform, which must never manage credentials. It is passed only to
+  `platform-workloads` Terraform, which must never manage credentials. It is passed to
   `delegate-failed-checks`' `mention-token` input, because GitHub's Copilot coding agent ignores
   `@copilot` mentions authored by a GitHub App/bot identity and only acts on mentions from a real
-  user with write access and Copilot entitlement. Every other step continues to use the GitHub
-  App token. If this secret is ever removed (empty), delegation comments still post (via the
-  `github-token` fallback) but Copilot will not act on them. If it is instead revoked or expired
-  rather than removed, the fallback does not apply — the action's `gh api user` lookup fails and
-  the step aborts — so replace or delete the secret rather than leaving a revoked value in place.
+  user with write access and Copilot entitlement, and to `approve-copilot-workflow-runs`'
+  `copilot-token` input, which needs a human account with Copilot entitlement to authenticate the
+  CLI risk-review call. Every other step, and every other input on those two steps, continues to
+  use the GitHub App token. If this secret is ever removed (empty), delegation comments still
+  post (via the `github-token` fallback) but Copilot will not act on them, and
+  `approve-copilot-workflow-runs` fails closed (leaves every run pending). If it is instead
+  revoked or expired rather than removed, the fallback does not apply for `delegate-failed-checks`
+  — the action's `gh api user` lookup fails and the step aborts — so replace or delete the secret
+  rather than leaving a revoked value in place.
 - Composite actions are referenced by folder-scoped release tags from `actions`
   (e.g. `frasermolyneux/actions/stale-branch-sweep@stale-branch-sweep/v1`). Bump the tag deliberately
   when adopting a new major/minor version; do not float on `main`.
