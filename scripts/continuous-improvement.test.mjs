@@ -81,7 +81,8 @@ test("SDK impact analysis has no tools and validates its response", async () => 
           assert.equal(config.sessionLimits.maxAiCredits, 30);
           return {
             sendAndWait: async (message) => {
-              assert.equal(message.responseSchema.required.includes("alertIds"), true);
+              assert.equal(message.responseSchema, undefined);
+              assert.match(message.prompt, /alertIds \(array of IDs\)/);
               return { data: { content: '{"decision":"skip"}' } };
             },
           };
