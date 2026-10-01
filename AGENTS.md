@@ -12,10 +12,17 @@ against each one:
   "out-of-date with base branch").
 - **delegate-failed-checks** — comments `@copilot investigate and resolve the failed checks on
   this pull request` once per failing commit SHA on open, non-draft pull requests with failing
-  checks.
+  checks. Caps delegation at 3 attempts per pull request (across all commits); once reached, posts
+  a one-time escalation comment instead of re-delegating indefinitely, since some failures (e.g.
+  cloud credential/Terraform provider errors) are environmental and no code change fixes them.
 - **approve-copilot-workflow-runs** — releases Actions workflow runs stuck awaiting approval
-  because they were triggered by a Copilot coding agent commit, after a deterministic CI-file
-  denylist check and an automated Copilot CLI risk review; anything ambiguous is left pending.
+  because they were triggered by a Copilot coding agent commit, or by a Dependabot pull request
+  (actor `github-actions[bot]`, only trusted when paired with pull request author
+  `dependabot[bot]`), after a deterministic CI-file denylist check and an automated Copilot CLI
+  risk review; anything ambiguous is left pending.
+- A final **summarize** job collects each repository's activity (only where something happened)
+  into a single comment on this repository's "Self-heal activity log" tracking issue, using the
+  default `github.token` (not the App token) since it only ever writes to this repository.
 
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.
@@ -66,6 +73,9 @@ There is no local build or test suite; validation is limited to workflow linting
   from the GitHub App installation so newly onboarded repositories are picked up automatically.
 - This is a scheduled, best-effort self-healing job: failures in one repository (`fail-fast:
   false`) must not block others.
+- The `summarize` job is the one exception to the job-level `permissions: {}` pattern: it needs
+  `issues: write` (and `actions: read` to download the per-repository activity artifacts) on the
+  default `github.token`, since it only ever reads/writes within `platform-devex` itself.
 
 ## Authoritative repository docs
 

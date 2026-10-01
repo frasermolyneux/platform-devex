@@ -9,7 +9,8 @@ GitHub App is installed on.
 
 - `.github/workflows/self-heal.yml` — discovers installation repositories, then runs
   `stale-branch-sweep`, `delegate-failed-checks`, and `approve-copilot-workflow-runs` per
-  repository on a schedule and via `workflow_dispatch`.
+  repository on a schedule and via `workflow_dispatch`, finishing with a `summarize` job that
+  posts a single activity comment when any repository needed attention.
 - The repository itself is provisioned by `platform-workloads`
   (`terraform/workloads/platform/platform-devex.json`); do not add Terraform to this repository.
 
@@ -33,7 +34,9 @@ git diff --check
 - Reference composite actions from `actions` by folder-scoped release tag
   (e.g. `frasermolyneux/actions/stale-branch-sweep@stale-branch-sweep/v1`), never `@main`.
 - Keep `permissions: {}` at the workflow level; grant only the token scopes each step actually
-  needs.
+  needs. The `summarize` job is the one exception — it uses the default `github.token` (not the
+  App token) scoped to `issues: write` and `actions: read`, since it only ever acts within
+  `platform-devex` itself.
 - Keep `fail-fast: false` on the sweep matrix so one repository's failure does not cancel others.
 - Do not hard-code target repository names — the list must come from the GitHub App
   installation so newly onboarded repositories are automatically covered.
