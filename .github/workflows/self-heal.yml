@@ -98,6 +98,7 @@ jobs:
           extra-trusted-pr-authors: "dependabot[bot]"
 
       - name: Write per-repo activity summary
+        id: activity-summary
         if: ${{ always() && steps.app-token.outcome == 'success' }}
         shell: bash
         env:
@@ -118,10 +119,17 @@ jobs:
 
           # Only a repo where the sweep actually did (or flagged) something
           # gets a row - a clean sweep across dozens of quiet repos would
-          # otherwise bury the handful that matter in noise.
+          # otherwise bury the handful that matter in noise. Report this via
+          # an explicit step output rather than hashFiles() on the written
+          # JSON file: hashFiles() only searches within GITHUB_WORKSPACE, so
+          # it can never match a file written under RUNNER_TEMP (as this one
+          # is) and would leave the next step's upload condition always
+          # false.
           if [[ "$TOTAL" -eq 0 ]]; then
+            echo "has_activity=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "has_activity=true" >> "$GITHUB_OUTPUT"
 
           {
             echo "| ${REPO} | ${UPDATED_COUNT:-0} (${UPDATED_PRS:-}) | ${DELEGATED_COUNT:-0} (${DELEGATED_PRS:-}) | ${ESCALATED_COUNT:-0} (${ESCALATED_PRS:-}) | ${APPROVED_COUNT:-0} (${APPROVED_PRS:-}) | ${BLOCKED_COUNT:-0} |"
@@ -143,7 +151,7 @@ jobs:
             > "${RUNNER_TEMP}/sweep-result/${REPO}.json"
 
       - name: Upload activity result
-        if: ${{ always() && steps.app-token.outcome == 'success' && hashFiles(format('{0}/sweep-result/*.json', runner.temp)) != '' }}
+        if: ${{ always() && steps.activity-summary.outputs.has_activity == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: sweep-result-${{ matrix.repo }}
