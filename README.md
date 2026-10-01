@@ -48,9 +48,10 @@ and a dry run (enabled by default for manual runs).
 For each opted-in repository, the workflow reads open default-branch CodeQL/code-scanning and
 Dependabot alerts, samples short source-file excerpts, and asks the Copilot SDK for a bounded
 impact analysis. It creates an issue **only** for a low-risk proposal with at most three alerts
-in one directory; critical alerts and broad or uncertain work remain for a human. The issue is
-assigned to Copilot, with a requirement to preserve functionality, architecture and cost and
-run the target repository's relevant unit, integration and Playwright tests. The improvement
+in one directory; critical alerts and broad or uncertain work remain for a human. Stale alerts
+whose source files no longer exist on the default branch are skipped with a warning. Eligible
+issues are assigned to Copilot, with a requirement to preserve functionality, architecture and
+cost and run the target repository's relevant unit, integration and Playwright tests. The improvement
 reconciler handles failed checks on its **draft** Copilot PRs and non-draft failures outside
 the sweep's check-run criteria (at most three attempts); the separate failed-check workflow
 handles non-draft check-run failures. It waits for automatic Copilot review of

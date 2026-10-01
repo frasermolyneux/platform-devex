@@ -226,6 +226,41 @@ test("cursor-paginated alerts and an unavailable source pause intake without an 
   }
 });
 
+test("a stale alert pointing to a deleted file is skipped without opening an issue", async () => {
+  const paths = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const path = new URL(url).pathname + new URL(url).search;
+    paths.push(`${init.method} ${path}`);
+    const result = {
+      "/user": { login: "owner" },
+      "/repos/owner/repo/issues?state=open&per_page=100": [],
+      "/repos/owner/repo/issues?state=closed&per_page=100": [],
+      "/repos/owner/repo/pulls?state=open&per_page=100": [],
+      "/repos/owner/repo/code-scanning/alerts?state=open&per_page=100": [{
+        number: 1, rule: { id: "rule", severity: "warning" },
+        most_recent_instance: { location: { path: "src/deleted.js", start_line: 5 } },
+      }],
+      "/repos/owner/repo/dependabot/alerts?state=open&per_page=100": [],
+      "/repos/owner/repo": { default_branch: "main" },
+    };
+    if (path === "/repos/owner/repo/contents/src/deleted.js?ref=main") return new Response("", { status: 404 });
+    assert.ok(path in result, `unexpected request: ${path}`);
+    return Response.json(result[path]);
+  };
+  try {
+    await main({
+      CI_MODE: "intake", CI_REPOSITORIES: "repo", CI_REPOSITORY: "repo",
+      GITHUB_REPOSITORY_OWNER: "owner", CI_DRY_RUN: "false",
+      APP_TOKEN: "app", APP_BOT_LOGIN: "app[bot]", COPILOT_AGENT_PAT: "human",
+    });
+    assert.equal(paths.some((path) => path.startsWith("POST ")), false);
+    assert.ok(paths.some((path) => path.includes("contents/src/deleted.js")));
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("a manually closed batch issue still blocks a new batch while its linked PR is open", async () => {
   const paths = [];
   const previousFetch = globalThis.fetch;

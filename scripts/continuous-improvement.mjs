@@ -225,7 +225,14 @@ async function addContext(api, repo, alerts) {
       throw new Error(`Unexpected alert path: ${alert.path}`);
     }
     const path = alert.path.split("/").map(encodeURIComponent).join("/");
-    const file = await api.request(`/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`);
+    let file;
+    try {
+      file = await api.request(`/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`);
+    } catch (error) {
+      if (!error.message.endsWith("HTTP 404")) throw error;
+      console.warn(`::warning::Skipping ${alert.id}: ${alert.path} is absent from ${branch}`);
+      continue;
+    }
     if (file.type !== "file" || file.size > 64_000 || file.encoding !== "base64") {
       console.warn(`::warning::Skipping ${alert.id}: source file cannot be safely analyzed`);
       continue;
