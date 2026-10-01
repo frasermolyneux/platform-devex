@@ -113,7 +113,11 @@ function nextPage(link, originalPath) {
   const next = link?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
   if (!next) return null;
   const url = new URL(next);
-  if (url.origin !== "https://api.github.com" || url.pathname !== originalPath.split("?")[0]) {
+  const original = originalPath.split("?")[0];
+  const endpoint = original.match(/^\/repos\/[^/]+\/[^/]+\/(.+)$/)?.[1];
+  const canonical = url.pathname.match(/^\/repositories\/\d+\/(.+)$/)?.[1];
+  if (url.origin !== "https://api.github.com" ||
+      (url.pathname !== original && (!endpoint || canonical !== endpoint))) {
     throw new Error("Unexpected GitHub pagination URL");
   }
   return `${url.pathname}${url.search}`;

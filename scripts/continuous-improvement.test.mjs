@@ -204,7 +204,7 @@ test("cursor-paginated alerts and an unavailable source pause intake without an 
     if (path in result) return Response.json(result[path]);
     if (path === "/repos/owner/repo/code-scanning/alerts?state=open&per_page=100") {
       return Response.json([], { headers: {
-        link: '<https://api.github.com/repos/owner/repo/code-scanning/alerts?state=open&per_page=100&after=cursor>; rel="next"',
+        link: '<https://api.github.com/repositories/1234/code-scanning/alerts?state=open&per_page=100&after=cursor>; rel="next"',
       } });
     }
     if (path.endsWith("after=cursor")) return Response.json([]);
@@ -218,7 +218,8 @@ test("cursor-paginated alerts and an unavailable source pause intake without an 
       APP_TOKEN: "app", APP_BOT_LOGIN: "app[bot]",
       COPILOT_AGENT_PAT: "human",
     });
-    assert.ok(paths.some((path) => path.includes("after=cursor")));
+    assert.ok(paths.some((path) => path.startsWith(
+      "GET /repositories/1234/code-scanning/alerts?state=open&per_page=100&after=cursor")));
     assert.equal(paths.some((path) => path.startsWith("POST ")), false);
   } finally {
     globalThis.fetch = previousFetch;
