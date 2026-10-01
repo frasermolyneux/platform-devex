@@ -78,6 +78,7 @@ test("SDK impact analysis has no tools and validates its response", async () => 
           assert.deepEqual(config.availableTools, []);
           assert.equal(config.onPermissionRequest().kind, "reject");
           assert.equal(config.skipCustomInstructions, true);
+          assert.equal(config.sessionLimits.maxAiCredits, 30);
           return {
             sendAndWait: async (message) => {
               assert.equal(message.responseSchema.required.includes("alertIds"), true);

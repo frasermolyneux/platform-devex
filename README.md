@@ -93,8 +93,10 @@ gh workflow run continuous-improvement.yml -f mode=intake -f repository=first-re
 
 The SDK uses the built-in `GITHUB_TOKEN` with `copilot-requests: write` (usage on this
 personally-owned repository is billed to its owner's Copilot seat), receives no repository
-write token or tools, and has a one-credit session limit. GitHub App installation tokens are
-minted separately per opted-in repository. The opt-in guard does not authorize external
+write token or tools, and makes one time-limited analysis request under the SDK's minimum
+supported 30-credit **soft** session limit (actual usage is typically much lower; one response
+can exceed the limit). GitHub App installation tokens are minted separately per opted-in repository.
+The opt-in guard does not authorize external
 contributions: the improvement path only follows trusted Copilot PRs from the same repository.
 
 ## Provisioning
