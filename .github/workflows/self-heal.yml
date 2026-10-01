@@ -193,7 +193,7 @@ jobs:
           retention-days: 7
 
   summarize:
-    needs: sweep
+    needs: [discover, sweep]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -211,12 +211,37 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          SWEEP_RESULT: ${{ needs.sweep.result }}
         run: |
           set -euo pipefail
 
-          # No artifacts means every repo in this run was quiet - nothing
-          # to summarize or report.
+          # Missing artifacts alone don't prove a quiet run: this job runs
+          # with always(), so a failed/cancelled discover or sweep job (or
+          # even just a failed Upload activity result step within it) can
+          # leave no artifact, or only a partial set, behind. Checking the
+          # upstream jobs' own result is the only way to tell "nothing
+          # needed attention" apart from "the run itself didn't finish".
+          INCOMPLETE=false
+          if [[ "$DISCOVER_RESULT" != "success" ]]; then
+            echo "::warning::repository discovery did not complete successfully (result: ${DISCOVER_RESULT}); this run's summary may be missing or incomplete"
+            INCOMPLETE=true
+          elif [[ "$SWEEP_RESULT" != "success" ]]; then
+            echo "::warning::sweep job did not complete successfully (result: ${SWEEP_RESULT}); this run's summary may be incomplete"
+            INCOMPLETE=true
+          fi
+
+          HAS_RESULTS=true
           if [[ ! -d results ]] || [[ -z "$(ls -A results 2>/dev/null)" ]]; then
+            HAS_RESULTS=false
+          fi
+
+          # Only skip reporting entirely when the run both completed
+          # successfully and genuinely had nothing to report - an
+          # incomplete run must always be surfaced, even with zero
+          # artifacts, rather than being indistinguishable from a clean
+          # quiet run.
+          if [[ "$HAS_RESULTS" == "false" && "$INCOMPLETE" == "false" ]]; then
             echo "No repositories required attention this run."
             exit 0
           fi
@@ -224,11 +249,19 @@ jobs:
           {
             echo "## Self-heal activity — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo ""
-            echo "| Repo | Branches updated | Delegated | Escalated | Runs approved | Runs left blocked |"
-            echo "| --- | --- | --- | --- | --- | --- |"
-            for f in results/*.json; do
-              jq -r 'if .failed then [.repo, "⚠️ FAILED - see run logs", "", "", "", ""] else [.repo, (.updated | tostring) + " (" + .updated_prs + ")", (.delegated | tostring) + " (" + .delegated_prs + ")", (.escalated | tostring) + " (" + .escalated_prs + ")", (.approved | tostring) + " (" + .approved_prs + ")", (.blocked | tostring)] end | "| " + join(" | ") + " |"' "$f"
-            done
+            if [[ "$INCOMPLETE" == "true" ]]; then
+              echo "⚠️ This run did not complete successfully (discover: ${DISCOVER_RESULT}, sweep: ${SWEEP_RESULT}); the table below may be missing repositories or incomplete. Check the workflow run logs."
+              echo ""
+            fi
+            if [[ "$HAS_RESULTS" == "true" ]]; then
+              echo "| Repo | Branches updated | Delegated | Escalated | Runs approved | Runs left blocked |"
+              echo "| --- | --- | --- | --- | --- | --- |"
+              for f in results/*.json; do
+                jq -r 'if .failed then [.repo, "⚠️ FAILED - see run logs", "", "", "", ""] else [.repo, (.updated | tostring) + " (" + .updated_prs + ")", (.delegated | tostring) + " (" + .delegated_prs + ")", (.escalated | tostring) + " (" + .escalated_prs + ")", (.approved | tostring) + " (" + .approved_prs + ")", (.blocked | tostring)] end | "| " + join(" | ") + " |"' "$f"
+              done
+            else
+              echo "No per-repository results were produced for this run."
+            fi
           } | tee -a "$GITHUB_STEP_SUMMARY" > body.md
 
           # Reuse a single open tracking issue across runs rather than
