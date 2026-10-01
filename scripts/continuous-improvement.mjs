@@ -1,5 +1,6 @@
-import { appendFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const BATCH_MARKER = "platform-devex-ci-batch-v1";
@@ -450,12 +451,15 @@ export async function analyze(alerts, createClient = async (options) => {
   for (const key of ["APP_TOKEN", "COPILOT_AGENT_PAT", "GH_APP_PEM", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"]) {
     delete sdkEnv[key];
   }
-  const client = await createClient({
-    mode: "empty",
-    useLoggedInUser: false,
-    env: sdkEnv,
-  });
+  const baseDirectory = await mkdtemp(join(tmpdir(), "platform-devex-ci-sdk-"));
+  let client;
   try {
+    client = await createClient({
+      mode: "empty",
+      baseDirectory,
+      useLoggedInUser: false,
+      env: sdkEnv,
+    });
     const session = await client.createSession({
       model: "auto",
       availableTools: [],
@@ -481,7 +485,11 @@ export async function analyze(alerts, createClient = async (options) => {
     if (!response?.data?.content) throw new Error("Copilot SDK produced no impact analysis");
     return JSON.parse(response.data.content);
   } finally {
-    await client.stop();
+    try {
+      if (client) await client.stop();
+    } finally {
+      await rm(baseDirectory, { recursive: true, force: true });
+    }
   }
 }
 

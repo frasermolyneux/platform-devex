@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -63,6 +63,7 @@ test("diff gate blocks sensitive paths and oversized changes", () => {
 test("SDK impact analysis has no tools and validates its response", async () => {
   const oldToken = process.env.GITHUB_TOKEN;
   const oldPat = process.env.COPILOT_AGENT_PAT;
+  let baseDirectory;
   process.env.GITHUB_TOKEN = "test";
   process.env.COPILOT_AGENT_PAT = "test-human";
   try {
@@ -70,6 +71,8 @@ test("SDK impact analysis has no tools and validates its response", async () => 
       assert.equal(options.mode, "empty");
       assert.equal(options.useLoggedInUser, false);
       assert.equal(options.env.COPILOT_AGENT_PAT, undefined);
+      baseDirectory = options.baseDirectory;
+      await access(baseDirectory);
       return {
         createSession: async (config) => {
           assert.deepEqual(config.availableTools, []);
@@ -86,6 +89,7 @@ test("SDK impact analysis has no tools and validates its response", async () => 
       };
     });
     assert.equal(result.decision, "skip");
+    await assert.rejects(access(baseDirectory), { code: "ENOENT" });
   } finally {
     if (oldToken === undefined) delete process.env.GITHUB_TOKEN;
     else process.env.GITHUB_TOKEN = oldToken;
