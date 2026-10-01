@@ -2,48 +2,67 @@
 
 ## Purpose and ownership
 
-This repository hosts scheduled internal-developer-platform automation. It does not contain
-application code. Its scheduled workflow discovers every repository the shared frasermolyneux
-GitHub App is installed on and runs self-healing composite actions from the `actions` repository
-against each one:
+This repository hosts scheduled internal-developer-platform automation, with a small Node.js
+controller for continuous improvement rather than target-application code. Three independent
+maintenance workflows discover every repository the shared frasermolyneux GitHub App is installed
+on and run locally vendored composite actions against each:
 
-- **stale-branch-sweep** — updates the head branch of open pull requests that have auto-merge
-  enabled but have fallen behind their base branch (unsticks Dependabot auto-merge PRs stuck
-  "out-of-date with base branch").
+- **stale-branch-sweep** — updates the head branch of every open pull request that is behind its
+  base branch, regardless of auto-merge status (also unsticks Dependabot PRs stuck
+  "out-of-date with base branch"; does not merge them).
 - **delegate-failed-checks** — comments `@copilot investigate and resolve the failed checks on
   this pull request` once per failing commit SHA on open, non-draft pull requests with failing
-  checks. Caps delegation at 3 attempts per pull request (across all commits); once reached, posts
-  a one-time escalation comment instead of re-delegating indefinitely, since some failures (e.g.
-  cloud credential/Terraform provider errors) are environmental and no code change fixes them.
+  checks whose head and base repositories match. Fork-head PRs and PRs with missing repository
+  metadata are skipped before a human-PAT comment can be posted; same-repository PRs retain their
+  prior handling regardless of author. Caps delegation at 3 attempts per pull request (across all
+  commits); once reached, posts a one-time escalation comment instead of re-delegating
+  indefinitely, since some failures (e.g. cloud credential/Terraform provider errors) are
+  environmental and no code change fixes them.
 - **approve-copilot-workflow-runs** — releases Actions workflow runs stuck awaiting approval
   because they were triggered by a Copilot coding agent commit, or by a Dependabot pull request
   (actor `github-actions[bot]`, only trusted when paired with pull request author
   `dependabot[bot]`), after a deterministic CI-file denylist check and an automated Copilot CLI
-  risk review; anything ambiguous is left pending.
-- A final **summarize** job collects each repository's activity (only where something happened)
-  into a single comment on this repository's "Self-heal activity log" tracking issue, using the
-  default `github.token` (not the App token) since it only ever writes to this repository.
+  risk review of the pending run's event-base-to-head diff when that base is recorded (with a
+  logged current-PR-base fallback); anything ambiguous is left pending.
+- Each workflow's **summarize** job collects its own per-repository activity (or failures) into
+  one run-specific comment on this repository's "Self-heal activity log" tracking issue, using
+  the default `github.token` (not the App token) since it only ever writes to this repository.
+
+`.github/workflows/continuous-improvement.yml` separately scans GitHub security and quality
+alerts for explicitly opted-in repositories daily, reconciles existing batches hourly, and
+leaves final PR review and merge to a human. It uses `scripts/continuous-improvement.mjs` and
+its Node tests. An empty `vars.CI_REPOSITORIES` disables the matrix; never default to all App
+installation repositories for this workflow.
 
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.
 
 ## Important paths
 
-- `.github/workflows/self-heal.yml` — the scheduled orchestrator: discovers installation
-  repositories, then runs `stale-branch-sweep`, `delegate-failed-checks`, and
-  `approve-copilot-workflow-runs` per repository.
+- `.github/workflows/stale-branches.yml` — discovers installation repositories and runs
+  `.github/actions/stale-branch-sweep/action.yml` per repository.
+- `.github/workflows/delegate-failed-checks.yml` — discovers installation repositories and runs
+  `.github/actions/delegate-failed-checks/action.yml` per repository.
+- `.github/workflows/approve-copilot-runs.yml` — discovers installation repositories and runs
+  `.github/actions/approve-copilot-workflow-runs/action.yml` per repository.
+- `.github/workflows/continuous-improvement.yml` — opt-in daily intake and hourly reconciliation.
+- `scripts/continuous-improvement.mjs` — Copilot SDK triage, linked issue/PR reconciliation,
+  bounded review fixes and human escalation.
 - `README.md` — repository overview and manual run instructions.
 
 ## Useful commands
 
 ```pwsh
-gh workflow run self-heal.yml
-gh workflow view self-heal.yml
-gh run list --workflow self-heal.yml --limit 5
+gh workflow run stale-branches.yml
+gh workflow run delegate-failed-checks.yml
+gh workflow run approve-copilot-runs.yml
+gh workflow run continuous-improvement.yml -f mode=intake -f dry_run=true
+gh run list --workflow stale-branches.yml --limit 5
+npm test
 ```
 
-There is no local build or test suite; validation is limited to workflow linting and
-`gh workflow run` / `gh run watch` against a real run.
+Validate with `npm run check`, `npm test`, workflow linting, `git diff --check` and, once the
+workflows are on the default branch, `gh workflow run` / `gh run watch` against a real run.
 
 ## Contracts and constraints
 
@@ -59,23 +78,49 @@ There is no local build or test suite; validation is limited to workflow linting
   `@copilot` mentions authored by a GitHub App/bot identity and only acts on mentions from a real
   user with write access and Copilot entitlement, and to `approve-copilot-workflow-runs`'
   `copilot-token` input, which needs a human account with Copilot entitlement to authenticate the
-  CLI risk-review call. Every other step, and every other input on those two steps, continues to
-  use the GitHub App token. If this secret is ever removed (empty), delegation comments still
+  CLI risk-review call. The improvement controller also uses this same token for Copilot issue
+  assignment and PR follow-up comments; its other target-repository operations use a scoped App
+  token. Other inputs on the two maintenance actions continue to use the GitHub App token.
+  If this secret is ever removed (empty), delegation comments still
   post (via the `github-token` fallback) but Copilot will not act on them, and
   `approve-copilot-workflow-runs` fails closed (leaves every run pending). If it is instead
   revoked or expired rather than removed, the fallback does not apply for `delegate-failed-checks`
   — the action's `gh api user` lookup fails and the step aborts — so replace or delete the secret
   rather than leaving a revoked value in place.
-- Composite actions are referenced by folder-scoped release tags from `actions`
-  (e.g. `frasermolyneux/actions/stale-branch-sweep@stale-branch-sweep/v1`). Bump the tag deliberately
-  when adopting a new major/minor version; do not float on `main`.
+- Maintenance composites were copied locally from `actions`; the delegation copy adds an opt-in
+  `same-repository-only` guard enabled by its workflow (default `false` for other callers). Each
+  matrix job checks out `platform-devex` at `${{ github.sha }}` with
+  `persist-credentials: false` before using the local action path; `contents: read` on the default
+  token is needed only for this checkout. Never check out the target repository to execute its
+  code as a maintenance action.
 - Do not hard-code repository names in the workflow — the target list is discovered dynamically
   from the GitHub App installation so newly onboarded repositories are picked up automatically.
-- This is a scheduled, best-effort self-healing job: failures in one repository (`fail-fast:
-  false`) must not block others.
-- The `summarize` job is the one exception to the job-level `permissions: {}` pattern: it needs
-  `issues: write` (and `actions: read` to download the per-repository activity artifacts) on the
-  default `github.token`, since it only ever reads/writes within `platform-devex` itself.
+- Each workflow has its own concurrency group and staggered 30-minute schedule. A failure in one
+  repository (`fail-fast: false`) must not block others. Failures and missing artifacts must be
+  reported as incomplete, not as quiet runs.
+- Continuous improvement batches must remain one per repository until the linked issue/PR is
+  complete. Triaging requires an explicit opt-in, available scanners and a low-risk bounded SDK
+  proposal. It must never treat a missing scanner, absent review, incomplete check set or
+  third-party PR as safe; unresolved work is escalated, never auto-merged.
+- The improvement controller handles draft Copilot PR failures and non-draft failures outside
+  the sweep's check-run criteria with up to three same-SHA deduplicated human-PAT mentions; the
+  separate failed-check action handles non-draft check-run failures. Draft PRs rely on automatic
+  Copilot review of drafts/new pushes, or a human marking them ready.
+- The single user-owned `COPILOT_AGENT_PAT` needs Metadata: read, Actions, Contents, Issues
+  and Pull requests: read/write on every opted-in repository for the preview issue-assignment
+  API, plus account-level Copilot Requests: read for CLI review. Never provision it through
+  Terraform. The improvement SDK uses the workflow's `GITHUB_TOKEN` with
+  `copilot-requests: write`, not this PAT or an App token. The scoped App token needs the
+  opted-in repository's scanning and issue/PR/check permissions; its installation permissions
+  are changed in `platform-workloads`.
+- Keep `permissions: {}` at the workflow level. Maintenance discover jobs need no default-token
+  permissions; the improvement discover job needs `contents: read` to check out its controller.
+  Matrix jobs grant only `contents: read` on the default token to check out local actions; the
+  per-repository GitHub App token requests only the action's required repository permissions.
+  `summarize` needs
+  `issues: write` and `actions: read` on the default token to download artifacts and write within
+  `platform-devex`. The improvement workflow grants `copilot-requests: write` only to its
+  per-repository analysis/reconciliation job and `issues: write` only to its failure reporter.
 
 ## Authoritative repository docs
 

@@ -1,0 +1,127 @@
+name: Continuous Improvement
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+    - cron: "11 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Discover new findings or reconcile existing batches"
+        type: choice
+        options: [intake, reconcile]
+        default: intake
+      repository:
+        description: "Optional opted-in repository name; blank selects all opted-in repositories"
+        type: string
+      dry_run:
+        description: "Report proposed actions without creating issues or posting comments"
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      repos: ${{ steps.select.outputs.repos }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Create discovery GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+      - name: Select opted-in installation repositories
+        id: select
+        env:
+          CI_MODE: discover
+          CI_REPOSITORIES: ${{ vars.CI_REPOSITORIES }}
+          CI_REPOSITORY: ${{ inputs.repository }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: node scripts/continuous-improvement.mjs
+
+  improve:
+    needs: discover
+    if: ${{ needs.discover.outputs.repos != '[]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      copilot-requests: write
+    concurrency:
+      group: platform-devex-ci-${{ matrix.repo }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        repo: ${{ fromJson(needs.discover.outputs.repos) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install Copilot SDK for impact analysis
+        if: ${{ github.event.schedule == '17 5 * * *' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'intake') }}
+        run: npm ci --no-audit --no-fund
+      - name: Create repository-scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repo }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
+          permission-checks: read
+          permission-statuses: read
+          permission-security-events: read
+          permission-vulnerability-alerts: read
+      - name: Analyze or reconcile continuous improvement
+        env:
+          CI_MODE: ${{ inputs.mode || (github.event.schedule == '17 5 * * *' && 'intake' || 'reconcile') }}
+          CI_REPOSITORY: ${{ matrix.repo }}
+          CI_REPOSITORIES: ${{ vars.CI_REPOSITORIES }}
+          CI_SCAN_SOURCES: ${{ vars.CI_SCAN_SOURCES || 'code-scanning,dependabot' }}
+          CI_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
+          COPILOT_AGENT_PAT: ${{ secrets.COPILOT_AGENT_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/continuous-improvement.mjs
+
+  report-failures:
+    needs: [discover, improve]
+    if: ${{ always() && (needs.discover.result != 'success' || (needs.improve.result != 'success' && needs.improve.result != 'skipped')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Report incomplete run for human attention
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISCOVERY_RESULT: ${{ needs.discover.result }}
+          IMPROVEMENT_RESULT: ${{ needs.improve.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="Continuous improvement did not complete (discovery: ${DISCOVERY_RESULT}, improvement: ${IMPROVEMENT_RESULT}). No incomplete scan or assessment should be treated as clean. Inspect ${RUN_URL}."
+          issue=$(gh issue list --repo "$REPOSITORY" --state open --search "Continuous improvement activity log in:title" --json number --jq '.[0].number // empty')
+          if [[ -z "$issue" ]]; then
+            issue=$(gh api "repos/${REPOSITORY}/issues" -f title="Continuous improvement activity log" -f body="Tracking issue for workflow failures and human escalations." --jq '.number')
+          fi
+          gh issue comment "$issue" --repo "$REPOSITORY" --body "$body"

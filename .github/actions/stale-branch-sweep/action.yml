@@ -1,0 +1,84 @@
+name: "stale-branch-sweep"
+description: "Updates the head branch of open pull requests that are behind their base branch"
+
+inputs:
+  github-token:
+    description: "Token with contents:write and pull-requests:write on the target repository"
+    required: true
+  repository:
+    description: "Target repository in owner/repo form"
+    required: true
+  dry-run:
+    description: "When true, only report which pull requests would be updated"
+    required: false
+    default: "false"
+
+outputs:
+  updated_count:
+    description: "Number of pull requests whose branch was updated (or would be, in dry-run)"
+    value: ${{ steps.sweep.outputs.updated_count }}
+  updated_pull_requests:
+    description: "Comma-separated pull request numbers that were updated (or would be, in dry-run)"
+    value: ${{ steps.sweep.outputs.updated_pull_requests }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Sweep stale auto-merge pull requests
+      id: sweep
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPOSITORY: ${{ inputs.repository }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        set -euo pipefail
+
+        # Captured via assignment (not process substitution) so a failing
+        # `gh api` call trips `set -e` instead of being silently swallowed.
+        # Every open PR is considered, regardless of auto-merge status:
+        # updating a branch only merges base into head and re-runs checks,
+        # it does not bypass review or merge anything on its own.
+        PR_NUMBERS_RAW=$(gh api "repos/${REPOSITORY}/pulls?state=open&per_page=100" --paginate --jq '.[].number')
+
+        UPDATED=()
+        if [[ -n "$PR_NUMBERS_RAW" ]]; then
+          while IFS= read -r NUM; do
+            [[ -z "$NUM" ]] && continue
+            STATE=$(gh api "repos/${REPOSITORY}/pulls/${NUM}" --jq '.mergeable_state')
+
+            # GitHub can briefly report "unknown" while it computes
+            # mergeability; poll a few times rather than skipping a PR that
+            # may actually be behind.
+            POLL_ATTEMPTS=0
+            while [[ "$STATE" == "unknown" && "$POLL_ATTEMPTS" -lt 5 ]]; do
+              sleep 2
+              STATE=$(gh api "repos/${REPOSITORY}/pulls/${NUM}" --jq '.mergeable_state')
+              POLL_ATTEMPTS=$((POLL_ATTEMPTS + 1))
+            done
+            echo "PR #${NUM}: mergeable_state=${STATE} (polled ${POLL_ATTEMPTS} time(s))"
+
+            if [[ "$STATE" == "behind" ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry-run: would update branch for PR #${NUM}"
+              else
+                if gh api -X PUT "repos/${REPOSITORY}/pulls/${NUM}/update-branch" --silent; then
+                  echo "Requested branch update for PR #${NUM}"
+                else
+                  echo "::warning::Update-branch request failed for PR #${NUM} (it may already be queued)"
+                  continue
+                fi
+              fi
+              UPDATED+=("${NUM}")
+            fi
+          done <<< "$PR_NUMBERS_RAW"
+        fi
+
+        COUNT=${#UPDATED[@]}
+        JOINED=$(IFS=,; echo "${UPDATED[*]:-}")
+
+        echo "Updated ${COUNT} pull request(s): ${JOINED:-none}"
+        {
+          echo "updated_count=${COUNT}"
+          echo "updated_pull_requests=${JOINED}"
+        } >> "$GITHUB_OUTPUT"
