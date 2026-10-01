@@ -69,8 +69,10 @@ test("SDK impact analysis has no tools and validates its response", async () => 
   try {
     const result = await analyze([{ id: "code-scanning:1", path: "src/a.js" }], async (options) => {
       assert.equal(options.mode, "empty");
+      assert.equal(options.gitHubToken, undefined);
       assert.equal(options.useLoggedInUser, false);
       assert.equal(options.env.COPILOT_AGENT_PAT, undefined);
+      assert.equal(options.env.COPILOT_GITHUB_TOKEN, "test");
       baseDirectory = options.baseDirectory;
       await access(baseDirectory);
       return {

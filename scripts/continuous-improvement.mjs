@@ -451,6 +451,7 @@ export async function analyze(alerts, createClient = async (options) => {
   for (const key of ["APP_TOKEN", "COPILOT_AGENT_PAT", "GH_APP_PEM", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"]) {
     delete sdkEnv[key];
   }
+  sdkEnv.COPILOT_GITHUB_TOKEN = process.env.GITHUB_TOKEN;
   const baseDirectory = await mkdtemp(join(tmpdir(), "platform-devex-ci-sdk-"));
   let client;
   try {
