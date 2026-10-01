@@ -169,6 +169,12 @@ jobs:
           if [[ "$FAILED" == "true" ]]; then
             FAILED_JSON=true
           fi
+          # Named "repo-<name>.json" rather than "<name>.json": a matrix
+          # repo whose name itself starts with a dot (e.g. ".github",
+          # ".github-copilot") would otherwise produce a hidden dotfile,
+          # which upload-artifact silently excludes by default - so that
+          # repo's activity/failure would never make it into the
+          # downloaded result set at all.
           jq -n \
             --arg repo "$REPO" \
             --argjson failed "$FAILED_JSON" \
@@ -182,7 +188,7 @@ jobs:
             --arg approved_prs "${APPROVED_PRS:-}" \
             --argjson blocked "${BLOCKED_COUNT:-0}" \
             '{repo: $repo, failed: $failed, updated: $updated, updated_prs: $updated_prs, delegated: $delegated, delegated_prs: $delegated_prs, escalated: $escalated, escalated_prs: $escalated_prs, approved: $approved, approved_prs: $approved_prs, blocked: $blocked}' \
-            > "${RUNNER_TEMP}/sweep-result/${REPO}.json"
+            > "${RUNNER_TEMP}/sweep-result/repo-${REPO}.json"
 
       - name: Upload activity result
         if: ${{ always() && steps.activity-summary.outputs.has_activity == 'true' }}
