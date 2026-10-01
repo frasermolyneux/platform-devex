@@ -1,0 +1,105 @@
+name: Diagnose Continuous Improvement App Permissions
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        type: string
+        required: true
+        default: portal-web
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Contents read
+        id: contents
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repository }}
+          permission-contents: read
+      - name: Issues write
+        id: issues
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repository }}
+          permission-issues: write
+      - name: Pull requests write
+        id: pulls
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repository }}
+          permission-pull-requests: write
+      - name: Checks read
+        id: checks
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repository }}
+          permission-checks: read
+      - name: Commit statuses read
+        id: statuses
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repository }}
+          permission-statuses: read
+      - name: Security events read
+        id: security
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repository }}
+          permission-security-events: read
+      - name: Dependabot alerts read
+        id: dependabot
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repository }}
+          permission-vulnerability-alerts: read
+      - name: Report permission outcomes
+        env:
+          CONTENTS: ${{ steps.contents.outcome }}
+          ISSUES: ${{ steps.issues.outcome }}
+          PULLS: ${{ steps.pulls.outcome }}
+          CHECKS: ${{ steps.checks.outcome }}
+          STATUSES: ${{ steps.statuses.outcome }}
+          SECURITY: ${{ steps.security.outcome }}
+          DEPENDABOT: ${{ steps.dependabot.outcome }}
+        run: |
+          {
+            echo "Contents: $CONTENTS"
+            echo "Issues: $ISSUES"
+            echo "Pull requests: $PULLS"
+            echo "Checks: $CHECKS"
+            echo "Commit statuses: $STATUSES"
+            echo "Security events: $SECURITY"
+            echo "Dependabot alerts: $DEPENDABOT"
+          } | tee "$GITHUB_STEP_SUMMARY"
