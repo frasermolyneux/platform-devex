@@ -99,10 +99,14 @@ jobs:
 
       - name: Write per-repo activity summary
         id: activity-summary
-        if: ${{ always() && steps.app-token.outcome == 'success' }}
+        if: always()
         shell: bash
         env:
           REPO: ${{ matrix.repo }}
+          APP_TOKEN_OUTCOME: ${{ steps.app-token.outcome }}
+          STALE_OUTCOME: ${{ steps.stale-branch-sweep.outcome }}
+          DELEGATE_OUTCOME: ${{ steps.delegate-failed-checks.outcome }}
+          APPROVE_OUTCOME: ${{ steps.approve-copilot-workflow-runs.outcome }}
           UPDATED_COUNT: ${{ steps.stale-branch-sweep.outputs.updated_count }}
           UPDATED_PRS: ${{ steps.stale-branch-sweep.outputs.updated_pull_requests }}
           DELEGATED_COUNT: ${{ steps.delegate-failed-checks.outputs.delegated_count }}
@@ -115,29 +119,59 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A step outcome of "failure" means it actually ran and errored;
+          # "skipped" (e.g. because app-token itself failed, so the `if:`
+          # guards on every later step were never satisfied) is handled by
+          # the explicit APP_TOKEN_OUTCOME check instead, since a skipped
+          # step's own outcome can't be distinguished from "never needed to
+          # run" on its own.
+          FAILED=false
+          if [[ "$APP_TOKEN_OUTCOME" != "success" ]]; then
+            FAILED=true
+          fi
+          for OUTCOME in "$STALE_OUTCOME" "$DELEGATE_OUTCOME" "$APPROVE_OUTCOME"; do
+            if [[ "$OUTCOME" == "failure" ]]; then
+              FAILED=true
+            fi
+          done
+
           TOTAL=$(( ${UPDATED_COUNT:-0} + ${DELEGATED_COUNT:-0} + ${ESCALATED_COUNT:-0} + ${APPROVED_COUNT:-0} + ${BLOCKED_COUNT:-0} ))
 
-          # Only a repo where the sweep actually did (or flagged) something
-          # gets a row - a clean sweep across dozens of quiet repos would
-          # otherwise bury the handful that matter in noise. Report this via
-          # an explicit step output rather than hashFiles() on the written
-          # JSON file: hashFiles() only searches within GITHUB_WORKSPACE, so
-          # it can never match a file written under RUNNER_TEMP (as this one
-          # is) and would leave the next step's upload condition always
-          # false.
-          if [[ "$TOTAL" -eq 0 ]]; then
+          # Only a repo where the sweep actually did (or flagged) something,
+          # or outright failed, gets a row - a clean sweep across dozens of
+          # quiet repos would otherwise bury the handful that matter in
+          # noise. Report this via an explicit step output rather than
+          # hashFiles() on the written JSON file: hashFiles() only searches
+          # within GITHUB_WORKSPACE, so it can never match a file written
+          # under RUNNER_TEMP (as this one is) and would leave the next
+          # step's upload condition always false.
+          if [[ "$FAILED" == "false" && "$TOTAL" -eq 0 ]]; then
             echo "has_activity=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "has_activity=true" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "| ${REPO} | ${UPDATED_COUNT:-0} (${UPDATED_PRS:-}) | ${DELEGATED_COUNT:-0} (${DELEGATED_PRS:-}) | ${ESCALATED_COUNT:-0} (${ESCALATED_PRS:-}) | ${APPROVED_COUNT:-0} (${APPROVED_PRS:-}) | ${BLOCKED_COUNT:-0} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          # A failed sweep must never be silently reported as "quiet": that
+          # would mask real outages (e.g. the App token being misconfigured
+          # or revoked) as if nothing needed attention this run.
+          if [[ "$FAILED" == "true" ]]; then
+            {
+              echo "| ${REPO} | ⚠️ sweep failed - see run logs | | | | |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "| ${REPO} | ${UPDATED_COUNT:-0} (${UPDATED_PRS:-}) | ${DELEGATED_COUNT:-0} (${DELEGATED_PRS:-}) | ${ESCALATED_COUNT:-0} (${ESCALATED_PRS:-}) | ${APPROVED_COUNT:-0} (${APPROVED_PRS:-}) | ${BLOCKED_COUNT:-0} |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           mkdir -p "${RUNNER_TEMP}/sweep-result"
+          FAILED_JSON=false
+          if [[ "$FAILED" == "true" ]]; then
+            FAILED_JSON=true
+          fi
           jq -n \
             --arg repo "$REPO" \
+            --argjson failed "$FAILED_JSON" \
             --argjson updated "${UPDATED_COUNT:-0}" \
             --arg updated_prs "${UPDATED_PRS:-}" \
             --argjson delegated "${DELEGATED_COUNT:-0}" \
@@ -147,7 +181,7 @@ jobs:
             --argjson approved "${APPROVED_COUNT:-0}" \
             --arg approved_prs "${APPROVED_PRS:-}" \
             --argjson blocked "${BLOCKED_COUNT:-0}" \
-            '{repo: $repo, updated: $updated, updated_prs: $updated_prs, delegated: $delegated, delegated_prs: $delegated_prs, escalated: $escalated, escalated_prs: $escalated_prs, approved: $approved, approved_prs: $approved_prs, blocked: $blocked}' \
+            '{repo: $repo, failed: $failed, updated: $updated, updated_prs: $updated_prs, delegated: $delegated, delegated_prs: $delegated_prs, escalated: $escalated, escalated_prs: $escalated_prs, approved: $approved, approved_prs: $approved_prs, blocked: $blocked}' \
             > "${RUNNER_TEMP}/sweep-result/${REPO}.json"
 
       - name: Upload activity result
@@ -193,7 +227,7 @@ jobs:
             echo "| Repo | Branches updated | Delegated | Escalated | Runs approved | Runs left blocked |"
             echo "| --- | --- | --- | --- | --- | --- |"
             for f in results/*.json; do
-              jq -r '[.repo, (.updated | tostring) + " (" + .updated_prs + ")", (.delegated | tostring) + " (" + .delegated_prs + ")", (.escalated | tostring) + " (" + .escalated_prs + ")", (.approved | tostring) + " (" + .approved_prs + ")", (.blocked | tostring)] | "| " + join(" | ") + " |"' "$f"
+              jq -r 'if .failed then [.repo, "⚠️ FAILED - see run logs", "", "", "", ""] else [.repo, (.updated | tostring) + " (" + .updated_prs + ")", (.delegated | tostring) + " (" + .delegated_prs + ")", (.escalated | tostring) + " (" + .escalated_prs + ")", (.approved | tostring) + " (" + .approved_prs + ")", (.blocked | tostring)] end | "| " + join(" | ") + " |"' "$f"
             done
           } | tee -a "$GITHUB_STEP_SUMMARY" > body.md
 
@@ -202,8 +236,12 @@ jobs:
           # activity needs to be visible at a glance.
           ISSUE_NUM=$(gh issue list --repo "${{ github.repository }}" --search "Self-heal activity log in:title" --state open --json number --jq '.[0].number // empty')
           if [[ -z "$ISSUE_NUM" ]]; then
-            ISSUE_NUM=$(gh issue create --repo "${{ github.repository }}" --title "Self-heal activity log" --body "Tracking issue for self-heal.yml activity summaries. Comments are added only for runs where at least one repository needed attention." --json number --jq '.number' 2>/dev/null) \
-              || gh issue create --repo "${{ github.repository }}" --title "Self-heal activity log" --body "Tracking issue for self-heal.yml activity summaries. Comments are added only for runs where at least one repository needed attention." | grep -oE '[0-9]+$'
+            # `gh issue create` does not support --json/--jq (unlike
+            # `gh issue list`), so it was previously piped through a
+            # `|| fallback` that ran outside the failing command
+            # substitution and never actually fed ISSUE_NUM, leaving it
+            # empty on the very first run. `gh api` supports --jq directly.
+            ISSUE_NUM=$(gh api "repos/${{ github.repository }}/issues" -f title="Self-heal activity log" -f body="Tracking issue for self-heal.yml activity summaries. Comments are added only for runs where at least one repository needed attention." --jq '.number')
           fi
 
           if [[ -n "$ISSUE_NUM" ]]; then
