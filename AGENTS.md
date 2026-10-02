@@ -102,9 +102,14 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   repository (`fail-fast: false`) must not block others. Failures and missing artifacts must be
   reported as incomplete, not as quiet runs.
 - Continuous improvement batches must remain one per repository until the linked issue/PR is
-  complete. Triaging requires an explicit opt-in, available scanners and a low-risk bounded SDK
-  proposal. It must never treat a missing scanner, absent review, incomplete check set or
-  third-party PR as safe; unresolved work is escalated, never auto-merged.
+  complete. Triaging requires an explicit opt-in, available scanners and a bounded low- or
+  medium-risk, behavior-preserving SDK proposal. Read public SonarCloud code-smell findings
+  from the verified `<owner>_<repository>` project (optionally authenticate with `SONAR_TOKEN`
+  for private projects); never mistake an unknown project, incomplete paging or analysis older
+  than the default-branch tip for a clean scan.
+  Diversify sampled rules and record before/after counts; wait for a post-merge Sonar analysis
+  before resolving SonarCloud findings. Keep `SONAR_TOKEN` out of the SDK environment. Missing
+  scanners, absent review, incomplete checks and third-party PRs are never safe; never auto-merge.
 - New batch issues carry the `platform-devex-ci` label in addition to their body marker; query
   this label when locating open/closed batches so unrelated issues in the same repository do not
   exhaust pagination. Do not remove the label from an in-progress issue.

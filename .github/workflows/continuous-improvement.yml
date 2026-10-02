@@ -93,11 +93,12 @@ jobs:
           CI_MODE: ${{ inputs.mode || (github.event.schedule == '17 5 * * *' && 'intake' || 'reconcile') }}
           CI_REPOSITORY: ${{ matrix.repo }}
           CI_REPOSITORIES: ${{ vars.CI_REPOSITORIES }}
-          CI_SCAN_SOURCES: ${{ vars.CI_SCAN_SOURCES || 'code-scanning,dependabot' }}
+          CI_SCAN_SOURCES: ${{ vars.CI_SCAN_SOURCES || 'code-scanning,dependabot,sonarcloud' }}
           CI_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
           COPILOT_AGENT_PAT: ${{ secrets.COPILOT_AGENT_PAT }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: node scripts/continuous-improvement.mjs
 
   report-failures:

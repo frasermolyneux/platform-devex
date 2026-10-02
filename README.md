@@ -48,14 +48,23 @@ two opted-in repositories run concurrently; each repository has one active issue
 time. A manual `workflow_dispatch` can select `intake` or `reconcile`, one opted-in repository,
 and a dry run (enabled by default for manual runs).
 
-For each opted-in repository, the workflow reads open default-branch CodeQL/code-scanning and
-Dependabot alerts, samples short source-file excerpts, and asks the Copilot SDK for a bounded
-impact analysis. It creates an issue **only** for a low-risk proposal with at most three alerts
-in one directory; critical alerts and broad or uncertain work remain for a human. Stale alerts
-whose source files no longer exist on the default branch are skipped with a warning. Eligible
-issues are assigned to Copilot, with a requirement to preserve functionality, architecture and
-cost and run the target repository's relevant unit, integration and Playwright tests. Batch issues
+For each opted-in repository, the workflow reads open default-branch CodeQL/code-scanning,
+Dependabot and SonarCloud **code-smell** findings. It samples up to 12 source excerpts from
+different rule/directory groups (not merely the first dozen alerts), and asks the Copilot SDK
+for an actionable, behavior-preserving quality or security improvement. It creates an issue
+only for a bounded low- or medium-risk proposal with at most four findings in one directory.
+Critical/blocker alerts, CI/infrastructure/auth changes and uncertain behavior remain for a
+human. A proposed PR may touch at most eight files and 250 changed lines; gated paths are
+always escalated. Stale alerts whose source files no longer exist on the default branch are
+skipped with a warning. Eligible issues are assigned to Copilot, with a requirement to preserve
+observable functionality, architecture, performance and cost and run the target repository's
+relevant unit, integration and Playwright tests. Batch issues
 carry a `platform-devex-ci` label so reconciliation does not page through unrelated issue history.
+Each issue records open-finding counts by scanner at intake. After human merge, the controller
+waits for the selected findings to disappear on the default branch and, for SonarCloud
+findings, for an analysis newer than the merge. It comments with before/after counts and the
+net change (which may reflect unrelated new findings) before closing the issue; a passing
+PR check alone never counts as a resolved finding.
 The improvement reconciler checks that its trusted, same-repository Copilot PR has a small,
 non-sensitive diff, updates its branch if behind, and marks a draft ready for review. This
 triggers repositories whose validation workflows skip drafts but run on `ready_for_review`.
@@ -72,7 +81,7 @@ branch freshness and GitHub merge requirements before posting a human handoff co
 alert IDs, changed files and passing check names. Optional skipped jobs are not reported as
 passing. The pending-run approval gate releases the PR's validation runs only after the
 separate CI-file denylist and restricted Copilot CLI risk review. **A human reviews and merges the PR.** After merging,
-the controller waits for the target alerts to disappear on the default branch before closing
+the controller verifies the target alerts are gone before closing
 the issue. An incomplete run is reported on this repository's "Continuous improvement activity
 log" issue; unavailable scanners are never treated as clean results.
 
@@ -84,10 +93,15 @@ Before opting in a repository:
    commits; automatic draft review is not required. A Copilot `COMMENTED` review without
    inline findings is **not** a formal approval: the final review and merge are always
    human decisions.
-   The workflow reads GitHub code-scanning/SARIF and Dependabot alerts; external services such
-   as SonarCloud require a separate integration. Both alert sources are required by default.
-   If only one is intentionally configured, set `CI_SCAN_SOURCES` to `code-scanning` or
-   `dependabot`. A source that *is* configured but returns an error pauses intake.
+   Code scanning, Dependabot and SonarCloud are required by default. The nine currently
+   opted-in repositories use public SonarCloud projects named `<owner>_<repository>`, which
+   can be read without a new secret. For private SonarCloud projects, set this repository's
+   `SONAR_TOKEN` secret to a SonarQube Cloud token with project browse permission. The token
+   is stripped from the Copilot SDK child process. Missing/inaccessible projects and
+   truncated, failed or stale scans (last analysis predates the default-branch tip) are never
+   treated as zero findings. To deliberately disable a
+   source, set `CI_SCAN_SOURCES` to a comma-separated subset of `code-scanning,dependabot,sonarcloud`;
+   disabling the source of an in-flight batch prevents post-merge verification.
 2. Grant the shared GitHub App **Security events: read** (code scanning), **Dependabot alerts:
    read** (vulnerability alerts), **Issues: write**, **Pull requests: write**, **Checks: read**,
    **Commit statuses: read**, and **Contents: read** on opted-in repositories. The App is
