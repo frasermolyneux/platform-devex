@@ -21,7 +21,9 @@ on and run locally vendored composite actions against each:
 - **approve-copilot-workflow-runs** — releases Actions workflow runs stuck awaiting approval
   because they were triggered by a Copilot coding agent commit, or by a Dependabot pull request
   (actor `github-actions[bot]`, only trusted when paired with pull request author
-  `dependabot[bot]`), after a deterministic CI-file denylist check and an automated Copilot CLI
+  `dependabot[bot]`). It also considers repository-owner-triggered ready-for-review runs only
+  when the current PR is a same-repository Copilot PR linked to an active labeled improvement
+  issue authored by that owner. All eligible runs pass a deterministic CI-file denylist and an automated Copilot CLI
   risk review of the pending run's event-base-to-head diff when that base is recorded (with a
   logged current-PR-base fallback); anything ambiguous is left pending.
 - Each workflow's **summarize** job collects its own per-repository activity (or failures) into

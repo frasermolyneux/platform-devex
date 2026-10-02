@@ -31,6 +31,10 @@ inputs:
     description: "Comma-separated pull request author logins (e.g. 'dependabot[bot]') required to authorize a run whose actor matched extra-trusted-actors. Ignored for the always-trusted 'Copilot' actor, which needs no additional author check."
     required: false
     default: ""
+  improvement-actor:
+    description: "Human account that marks continuous-improvement Copilot PRs ready. Only runs on current, same-repository Copilot PRs linked to an open, labeled batch issue authored by this account are eligible for review."
+    required: false
+    default: ""
 
 outputs:
   approved_count:
@@ -67,6 +71,7 @@ runs:
         BOT_LOGIN: ${{ inputs.bot-login }}
         EXTRA_TRUSTED_ACTORS: ${{ inputs.extra-trusted-actors }}
         EXTRA_TRUSTED_PR_AUTHORS: ${{ inputs.extra-trusted-pr-authors }}
+        IMPROVEMENT_ACTOR: ${{ inputs.improvement-actor }}
       run: |
         set -euo pipefail
 
@@ -88,15 +93,9 @@ runs:
         # (workflow/CI tampering) the approval gate exists to catch.
         DENY_REGEX='(^|/)\.github/workflows/|(^|/)\.github/actions/|(^|/)action\.ya?ml$|(^|/)Dockerfile([^/]*)$|^CODEOWNERS$|(^|/)docs/CODEOWNERS$|(^|/)\.github/CODEOWNERS$|(^|/)\.github/dependabot\.ya?ml$'
 
-        # Build the jq array of trusted actor logins once: "Copilot" is
-        # always trusted (our original delegation target, narrow and
-        # specific enough on its own), plus whatever the caller opted into
-        # via extra-trusted-actors (e.g. "github-actions[bot]" for
-        # Dependabot-triggered runs - Dependabot itself never appears as a
-        # run's actor; GitHub records the run as triggered by
-        # "github-actions[bot]" instead, verified empirically against a
-        # real stuck Dependabot pull request).
-        TRUSTED_ACTORS_JSON=$(printf '%s\n' "Copilot" "${EXTRA_TRUSTED_ACTORS//,/$'\n'}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$' | jq -R -s -c 'split("\n") | map(select(length > 0)) | unique')
+        # Select candidate actors; human ready-for-review and broad bot
+        # actors undergo their own provenance gates below.
+        TRUSTED_ACTORS_JSON=$(printf '%s\n' "Copilot" "${EXTRA_TRUSTED_ACTORS//,/$'\n'}" "$IMPROVEMENT_ACTOR" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$' | jq -R -s -c 'split("\n") | map(select(length > 0)) | unique')
 
         # `gh api --jq` does not accept `--argjson`, so the actor filter is
         # applied by an external `jq -s` over one run object per line
@@ -133,16 +132,39 @@ runs:
               continue
             fi
 
-            # "Copilot" is a specific enough actor login to trust on its
-            # own, but the other actors a caller may opt into (e.g.
-            # "github-actions[bot]") are the recorded actor for many
-            # unrelated action_required cases, not just the automation this
-            # action is meant to cover. For any actor other than "Copilot",
-            # additionally require the pull request's own author to be in
-            # extra-trusted-pr-authors before reviewing it at all - this
-            # keeps a broad actor login from silently trusting an arbitrary
-            # contributor's pull request just because it shares that actor.
-            if [[ "$ACTOR_LOGIN" != "Copilot" ]]; then
+            # Human-triggered runs require the current Copilot PR and its
+            # owner-authored batch issue. Other broad actors still require
+            # their paired PR author before any diff review or release.
+            if [[ -n "$IMPROVEMENT_ACTOR" && "$ACTOR_LOGIN" == "$IMPROVEMENT_ACTOR" ]]; then
+              PR_JSON=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}")
+              if ! echo "$PR_JSON" | jq -e --arg repo "$REPOSITORY" --arg head "$HEAD_SHA" '
+                (.user.login == "Copilot" or .user.login == "copilot-swe-agent[bot]")
+                and .state == "open" and .draft == false
+                and .head.repo.full_name == $repo and .base.repo.full_name == $repo
+                and (.head.ref | startswith("copilot/")) and .head.sha == $head
+              ' >/dev/null; then
+                echo "Run ${RUN_ID} (PR #${PR_NUM}): improvement actor requires a current, same-repository Copilot PR; leaving for human approval"
+                BLOCKED+=("${RUN_ID}")
+                continue
+              fi
+              ISSUE_NUM=$(echo "$PR_JSON" | jq -r '[.body // "" | scan("#[0-9]+") | ltrimstr("#")] | unique | if length == 1 then .[0] else empty end')
+              if [[ -z "$ISSUE_NUM" ]]; then
+                echo "Run ${RUN_ID} (PR #${PR_NUM}): improvement PR does not reference exactly one issue; leaving for human approval"
+                BLOCKED+=("${RUN_ID}")
+                continue
+              fi
+              ISSUE_JSON=$(gh api "repos/${REPOSITORY}/issues/${ISSUE_NUM}")
+              if ! echo "$ISSUE_JSON" | jq -e --arg actor "$IMPROVEMENT_ACTOR" '
+                .user.login == $actor and .state == "open"
+                and any(.labels[]?; .name == "platform-devex-ci")
+                and (.body | startswith("<!-- platform-devex-ci-batch-v1:"))
+                and (.assignee.login == "Copilot" or .assignee.login == "copilot-swe-agent[bot]")
+              ' >/dev/null; then
+                echo "Run ${RUN_ID} (PR #${PR_NUM}): linked issue #${ISSUE_NUM} is not an active trusted improvement batch; leaving for human approval"
+                BLOCKED+=("${RUN_ID}")
+                continue
+              fi
+            elif [[ "$ACTOR_LOGIN" != "Copilot" ]]; then
               PR_AUTHOR=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}" --jq '.user.login')
               AUTHOR_TRUSTED=false
               IFS=',' read -ra TRUSTED_AUTHORS <<< "${EXTRA_TRUSTED_PR_AUTHORS}"
@@ -265,6 +287,8 @@ runs:
               # (and differently risky) kind of change to reason about.
               if [[ "$ACTOR_LOGIN" == "Copilot" ]]; then
                 ORIGIN_DESC="a commit from the GitHub Copilot coding agent, responding to an automated request to fix failing checks on this pull request"
+              elif [[ -n "$IMPROVEMENT_ACTOR" && "$ACTOR_LOGIN" == "$IMPROVEMENT_ACTOR" ]]; then
+                ORIGIN_DESC="a same-repository Copilot coding agent change on a verified continuous-improvement issue, marked ready by its human owner"
               else
                 ORIGIN_DESC="a commit on a pull request opened by ${PR_AUTHOR:-an automated actor} (workflow run actor: ${ACTOR_LOGIN}), pre-approved for review because both are on this repository's trusted automation list"
               fi

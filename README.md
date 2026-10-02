@@ -27,7 +27,10 @@ from `.github/actions/`:
   actor `github-actions[bot]` **only** when the PR author is `dependabot[bot]`. Its deterministic
   CI-file denylist and Copilot CLI risk review use the pending run's event-time base and head
   commits when recorded (with a logged fallback to the current PR base if the event base is
-  absent); ambiguous or unsafe changes remain pending for a human.
+  absent). Runs triggered when the repository owner marks an improvement PR ready are also
+  eligible **only** for a current, same-repository Copilot PR linked to an open, labeled batch
+  issue authored by that owner; they pass the same denylist and risk review. Ambiguous or unsafe
+  changes remain pending for a human.
 
 Each matrix tolerates other repositories failing (`fail-fast: false`). Each workflow uploads
 activity or failure results per repository and posts one run-specific comment to the existing
@@ -63,7 +66,8 @@ requests a review of the latest commit from Copilot, delegates inline findings a
 and escalates stalled, oversized, CI-changing or unresolved work. It rechecks the PR's SHA,
 branch freshness and GitHub merge requirements before posting a human handoff containing
 alert IDs, changed files and passing check names. Optional skipped jobs are not reported as
-passing. **A human reviews and merges the PR.** After merging,
+passing. The pending-run approval gate releases the PR's validation runs only after the
+separate CI-file denylist and restricted Copilot CLI risk review. **A human reviews and merges the PR.** After merging,
 the controller waits for the target alerts to disappear on the default branch before closing
 the issue. An incomplete run is reported on this repository's "Continuous improvement activity
 log" issue; unavailable scanners are never treated as clean results.

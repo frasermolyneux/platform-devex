@@ -67,6 +67,7 @@ jobs:
           permission-actions: write
           permission-pull-requests: write
           permission-contents: read
+          permission-issues: read
 
       - name: Release pending trusted workflow runs
         id: approve-copilot-workflow-runs
@@ -81,6 +82,7 @@ jobs:
           # Trust that actor only when the PR author is also dependabot[bot].
           extra-trusted-actors: "github-actions[bot]"
           extra-trusted-pr-authors: "dependabot[bot]"
+          improvement-actor: ${{ github.repository_owner }}
 
       - name: Write per-repo activity summary
         id: activity-summary
