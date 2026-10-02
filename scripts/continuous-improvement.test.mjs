@@ -59,6 +59,10 @@ test("check state does not treat stale commit statuses as failures", () => {
     { state: "pending", statuses: [] }), "pending");
   assert.equal(checkState({ check_runs: [{ status: "completed", conclusion: "neutral" }] },
     { state: "pending", statuses: [] }), "pending");
+  assert.equal(checkState({ check_runs: [
+    { name: "build", status: "completed", conclusion: "skipped" },
+    { name: "copilot-pull-request-reviewer", status: "completed", conclusion: "success" },
+  ] }, { state: "pending", statuses: [] }), "pending");
   assert.equal(checkState({ check_runs: [] }, { state: "success", statuses: [{ state: "success" }] }), "passed");
 });
 

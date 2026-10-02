@@ -11,7 +11,8 @@ const FIX_MARKER = "<!-- platform-devex-ci-fix:";
 const READY_MARKER = "<!-- platform-devex-ci-ready:";
 const DELEGATE_MARKER = "<!-- devex-copilot-delegate -->";
 const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
-const COPILOT_COMMENTERS = new Set([COPILOT_REVIEWER, "copilot-pull-request-reviewer", "Copilot"]);
+const COPILOT_REVIEW_CHECK = "copilot-pull-request-reviewer";
+const COPILOT_COMMENTERS = new Set([COPILOT_REVIEWER, COPILOT_REVIEW_CHECK, "Copilot"]);
 const AGENT_AUTHORS = new Set(["copilot-swe-agent[bot]", "Copilot"]);
 const MAX_BATCH = 3;
 const MAX_FIXES = 2;
@@ -45,7 +46,7 @@ export function checkState(checks, status) {
       ["failure", "error"].includes(status.state)) return "failed";
   if (runs.some((run) => run.status !== "completed") ||
       (status.statuses.length > 0 && status.state === "pending")) return "pending";
-  return runs.some((run) => run.conclusion === "success") ||
+  return runs.some((run) => run.conclusion === "success" && run.name !== COPILOT_REVIEW_CHECK) ||
     (status.statuses.length > 0 && status.state === "success") ? "passed" : "pending";
 }
 
@@ -317,8 +318,8 @@ async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dry
       marker, `PR #${pr.number} is ready for **human** review and merge.`,
       `Findings: ${batch.alertIds.join(", ")}`,
       `Changed files: ${files.map((file) => clean(file.filename)).join(", ")}`,
-      `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success").map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
-      "Copilot reviewed the latest commit without inline findings. Check its review assessment and verify unit, integration and Playwright coverage as appropriate before merging.",
+      `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success" && run.name !== COPILOT_REVIEW_CHECK).map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
+      "Copilot reviewed the latest commit; no unresolved inline findings remain. Check its review assessment and verify unit, integration and Playwright coverage as appropriate before merging.",
     ].join("\n") },
   });
 }
