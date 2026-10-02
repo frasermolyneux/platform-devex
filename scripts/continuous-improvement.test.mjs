@@ -132,15 +132,16 @@ test("candidate sampling prioritizes higher-impact rules over large cosmetic gro
   assert.equal(selectCandidates(alerts)[0].id, "sonarcloud:Impact");
 });
 
-test("code-scanning security scores reject critical findings rather than treating them as unknown", async () => {
-  const records = ["9.1", "7.5", "4.2"].map((score, index) => ({
+test("code-scanning numeric and textual security severities preserve critical protection", async () => {
+  const records = ["9.1", "7.5", "4.2", "critical", "high", "medium"].map((score, index) => ({
     number: index + 1, rule: { id: `rule-${index}`, security_severity_level: score },
     most_recent_instance: { location: { path: `src/${index}.js`, start_line: 5 } },
   }));
   const api = { pages: async () => records };
   const scan = await scanAlerts(api, "owner/repo", ["code-scanning"]);
-  assert.deepEqual(scan.alerts.map((alert) => alert.severity), ["critical", "high", "medium"]);
-  assert.equal(selectCandidates(scan.alerts).some((alert) => alert.id === "code-scanning:1"), false);
+  assert.deepEqual(scan.alerts.map((alert) => alert.severity),
+    ["critical", "high", "medium", "critical", "high", "medium"]);
+  assert.equal(selectCandidates(scan.alerts).some((alert) => ["code-scanning:1", "code-scanning:4"].includes(alert.id)), false);
   assert.equal(validateProposal({
     decision: "propose", risk: "medium", title: "Security fix",
     rationale: "Fix the issue", tests: ["npm test"], alertIds: ["code-scanning:1"],

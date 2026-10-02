@@ -180,6 +180,8 @@ function codeScanningSeverity(rule) {
   if (rule.security_severity_level === undefined || rule.security_severity_level === null) {
     return rule.severity ?? "unknown";
   }
+  const label = String(rule.security_severity_level).toLowerCase();
+  if (["critical", "high", "medium", "low"].includes(label)) return label;
   const score = Number(rule.security_severity_level);
   if (!/^\d+(?:\.\d+)?$/.test(String(rule.security_severity_level)) || score > 10) {
     throw new Error(`Invalid code-scanning security severity: ${clean(rule.security_severity_level)}`);
