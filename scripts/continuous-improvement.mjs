@@ -502,7 +502,7 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
   if (referenceFinding) {
     await note(`${repo}#${issue.number}: ${dryRun ? "would resolve" : "resolving"} addressed issue-reference review thread on PR #${pr.number}.`);
     if (!dryRun) {
-      const response = await app.request("/graphql", {
+      const response = await human.request("/graphql", {
         method: "POST",
         body: {
           query: "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}",

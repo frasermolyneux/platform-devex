@@ -648,6 +648,7 @@ test("Copilot issue-reference finding is fixed and resolved before the human han
     await run();
     assert.equal(state.writes[1].path, "/graphql");
     assert.equal(state.writes[1].body.variables.id, "THREAD_1");
+    assert.equal(state.writes[1].token, "Bearer human");
     assert.equal(state.threads[0].isResolved, true);
     state.pr.mergeable_state = "clean";
     await run();

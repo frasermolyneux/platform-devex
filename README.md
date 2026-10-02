@@ -129,9 +129,10 @@ step (`.../actions/runs/{id}/rerun`) still needs an authenticated Copilot CLI ca
 same human account, to produce its risk-review verdict. Since the maintenance workflows otherwise
 run on the shared GitHub App's installation tokens, one fine-grained personal access token
 (`secrets.COPILOT_AGENT_PAT`) is used for the delegation comment, the CLI risk-review call,
-the improvement controller's Copilot issue assignment, PR follow-up comments, ready-for-review
-transition and branch updates, and the restricted SDK analysis session. The improvement
-controller uses its scoped App token for target reads and review requests;
+the improvement controller's Copilot issue assignment, PR follow-up comments,
+ready-for-review transition, branch updates and review-thread resolution, and the
+restricted SDK analysis session. The improvement controller uses its scoped App token
+for target reads and review requests;
 discovery, `stale-branch-sweep`, the maintenance actions' read-only lookups, the pending-run
 release call and audit comment, and the delegation fallback comment use the App token.
 

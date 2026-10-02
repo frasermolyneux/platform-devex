@@ -117,7 +117,8 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   non-draft check-run failures. Copilot reviews are requested after passing validation;
   unresolved Copilot review threads must be addressed before handoff. Auto-closing issue
   references in the PR description are replaced with `Refs #...` to retain the batch issue
-  for post-merge verification, then only the corresponding review thread is resolved.
+  for post-merge verification, then only the corresponding review thread is resolved
+  using the human PAT (GitHub rejects the App token for this mutation).
 - The single user-owned `COPILOT_AGENT_PAT` needs Metadata: read, Actions, Contents, Issues
   and Pull requests: read/write on every opted-in repository for the preview issue-assignment
   API, plus account-level Copilot Requests: read for CLI review. Never provision it through
