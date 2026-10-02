@@ -100,7 +100,9 @@ runs:
         # `gh api --jq` does not accept `--argjson`, so the actor filter is
         # applied by an external `jq -s` over one run object per line
         # (consistent with the comment-lookup pattern later in this step).
-        RUN_IDS_RAW=$(gh api "repos/${REPOSITORY}/actions/runs?status=action_required&per_page=100" --paginate --jq '.workflow_runs[]?' | jq -s -r --argjson actors "$TRUSTED_ACTORS_JSON" '.[] | select(.actor.login as $a | $actors | index($a)) | .id')
+        RUNS_RAW=$(gh api "repos/${REPOSITORY}/actions/runs?status=action_required&per_page=100" --paginate --jq '.workflow_runs[]?')
+        RUN_IDS_RAW=$(printf '%s\n' "$RUNS_RAW" | jq -s -r --argjson actors "$TRUSTED_ACTORS_JSON" '.[] | select(.actor.login as $a | $actors | index($a)) | .id')
+        echo "Approval scan: $(printf '%s\n' "$RUNS_RAW" | jq -s 'length') pending run(s); $(printf '%s\n' "$RUN_IDS_RAW" | grep -c . || true) candidate run(s)"
 
         APPROVED=()
         BLOCKED=()
