@@ -54,7 +54,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      copilot-requests: write
     concurrency:
       group: platform-devex-ci-${{ matrix.repo }}
       cancel-in-progress: false
@@ -99,7 +98,6 @@ jobs:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
           COPILOT_AGENT_PAT: ${{ secrets.COPILOT_AGENT_PAT }}
-          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/continuous-improvement.mjs
 
   report-failures:

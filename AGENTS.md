@@ -79,7 +79,8 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   user with write access and Copilot entitlement, and to `approve-copilot-workflow-runs`'
   `copilot-token` input, which needs a human account with Copilot entitlement to authenticate the
   CLI risk-review call. The improvement controller also uses this same token for Copilot issue
-  assignment and PR follow-up comments; its other target-repository operations use a scoped App
+  assignment, PR follow-up comments and a restricted, no-tool SDK analysis session; its other
+  target-repository operations use a scoped App
   token. Other inputs on the two maintenance actions continue to use the GitHub App token.
   If this secret is ever removed (empty), delegation comments still
   post (via the `github-token` fallback) but Copilot will not act on them, and
@@ -109,8 +110,9 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
 - The single user-owned `COPILOT_AGENT_PAT` needs Metadata: read, Actions, Contents, Issues
   and Pull requests: read/write on every opted-in repository for the preview issue-assignment
   API, plus account-level Copilot Requests: read for CLI review. Never provision it through
-  Terraform. The improvement SDK uses the workflow's `GITHUB_TOKEN` with
-  `copilot-requests: write`, not this PAT or an App token. The scoped App token needs the
+  Terraform. The improvement SDK uses this PAT only as session identity, with no tools or custom
+  instructions, rejecting permission requests and stripping tokens from the child environment.
+  The scoped App token needs the
   opted-in repository's scanning and issue/PR/check permissions; its installation permissions
   are changed in `platform-workloads`.
 - Keep `permissions: {}` at the workflow level. Maintenance discover jobs need no default-token
@@ -119,8 +121,8 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   per-repository GitHub App token requests only the action's required repository permissions.
   `summarize` needs
   `issues: write` and `actions: read` on the default token to download artifacts and write within
-  `platform-devex`. The improvement workflow grants `copilot-requests: write` only to its
-  per-repository analysis/reconciliation job and `issues: write` only to its failure reporter.
+  `platform-devex`. The improvement workflow grants `contents: read` to its jobs for checkout
+  and `issues: write` only to its failure reporter.
 
 ## Authoritative repository docs
 

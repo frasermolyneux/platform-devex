@@ -83,20 +83,19 @@ Before opting in a repository:
    repositories. Its owner needs Copilot entitlement and write access to each one. GitHub's
    preview issue-assignment API requires a **user token**, not the App installation token.
    Grant the repository permissions listed below, then update the existing secret if the
-   token was rotated. The PAT is not passed to the impact-analysis SDK. To configure the
-   opt-in after provisioning:
+   token was rotated. To configure the opt-in after provisioning:
 
 ```pwsh
 gh variable set CI_REPOSITORIES --body "first-repo,second-repo" --repo frasermolyneux/platform-devex
 gh workflow run continuous-improvement.yml -f mode=intake -f repository=first-repo -f dry_run=true --repo frasermolyneux/platform-devex
 ```
 
-The SDK uses the built-in `GITHUB_TOKEN` with `copilot-requests: write` (usage on this
-personally-owned repository is billed to its owner's Copilot seat), receives no repository
-write token or tools, and makes one time-limited analysis request under the SDK's minimum
-supported 30-credit **soft** session limit (actual usage is typically much lower; one response
-can exceed the limit). GitHub App installation tokens are minted separately per opted-in repository.
-The opt-in guard does not authorize external
+The SDK uses the existing user-owned `COPILOT_AGENT_PAT` only as a per-session identity; the
+token is stripped from the SDK child process's environment. Its restricted session has no tools,
+rejects all permission requests, loads no custom instructions, and makes one time-limited analysis
+request under the SDK's minimum supported 30-credit **soft** session limit (one response can
+exceed the limit). Usage is billed to the PAT owner's Copilot seat. GitHub App installation
+tokens are minted separately per opted-in repository. The opt-in guard does not authorize external
 contributions: the improvement path only follows trusted Copilot PRs from the same repository.
 
 ## Provisioning
@@ -116,7 +115,8 @@ step (`.../actions/runs/{id}/rerun`) still needs an authenticated Copilot CLI ca
 same human account, to produce its risk-review verdict. Since the maintenance workflows otherwise
 run on the shared GitHub App's installation tokens, one fine-grained personal access token
 (`secrets.COPILOT_AGENT_PAT`) is used for the delegation comment, the CLI risk-review call,
-and the improvement controller's Copilot issue assignment and PR follow-up comments. The
+the improvement controller's Copilot issue assignment and PR follow-up comments, and the
+restricted SDK analysis session. The
 improvement controller uses its scoped App token for target reads and review requests;
 discovery, `stale-branch-sweep`, the maintenance actions' read-only lookups, the pending-run
 release call and audit comment, and the delegation fallback comment use the App token.

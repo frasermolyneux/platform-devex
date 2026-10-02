@@ -446,12 +446,11 @@ export async function analyze(alerts, createClient = async (options) => {
   const { CopilotClient } = await import("@github/copilot-sdk");
   return new CopilotClient(options);
 }) {
-  if (!process.env.GITHUB_TOKEN) throw new Error("GITHUB_TOKEN is required for Copilot SDK analysis");
+  if (!process.env.COPILOT_AGENT_PAT) throw new Error("COPILOT_AGENT_PAT is required for Copilot SDK analysis");
   const sdkEnv = { ...process.env };
-  for (const key of ["APP_TOKEN", "COPILOT_AGENT_PAT", "GH_APP_PEM", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"]) {
+  for (const key of ["APP_TOKEN", "COPILOT_AGENT_PAT", "GH_APP_PEM", "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"]) {
     delete sdkEnv[key];
   }
-  sdkEnv.COPILOT_GITHUB_TOKEN = process.env.GITHUB_TOKEN;
   const baseDirectory = await mkdtemp(join(tmpdir(), "platform-devex-ci-sdk-"));
   let client;
   try {
@@ -463,6 +462,7 @@ export async function analyze(alerts, createClient = async (options) => {
     });
     const session = await client.createSession({
       model: "auto",
+      gitHubToken: process.env.COPILOT_AGENT_PAT,
       availableTools: [],
       skipCustomInstructions: true,
       onPermissionRequest: () => ({ kind: "reject", feedback: "Analysis must be read-only." }),

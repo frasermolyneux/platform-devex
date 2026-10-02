@@ -72,7 +72,8 @@ test("SDK impact analysis has no tools and validates its response", async () => 
       assert.equal(options.gitHubToken, undefined);
       assert.equal(options.useLoggedInUser, false);
       assert.equal(options.env.COPILOT_AGENT_PAT, undefined);
-      assert.equal(options.env.COPILOT_GITHUB_TOKEN, "test");
+      assert.equal(options.env.COPILOT_GITHUB_TOKEN, undefined);
+      assert.equal(options.env.GITHUB_TOKEN, undefined);
       baseDirectory = options.baseDirectory;
       await access(baseDirectory);
       return {
@@ -81,6 +82,7 @@ test("SDK impact analysis has no tools and validates its response", async () => 
           assert.equal(config.onPermissionRequest().kind, "reject");
           assert.equal(config.skipCustomInstructions, true);
           assert.equal(config.sessionLimits.maxAiCredits, 30);
+          assert.equal(config.gitHubToken, "test-human");
           return {
             sendAndWait: async (message) => {
               assert.equal(message.responseSchema, undefined);
