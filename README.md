@@ -16,10 +16,12 @@ from `.github/actions/`:
   also unsticks Dependabot PRs that are "out-of-date with base branch"; it does not merge PRs.
 - `.github/workflows/delegate-failed-checks.yml` runs `delegate-failed-checks`, which comments
   `@copilot investigate and resolve the failed checks on this pull request` once per failing
-  commit SHA on an open, non-draft PR. This workflow opts into `same-repository-only`: it skips
-  fork-head PRs (and PRs with missing head/base repository metadata) **before** posting a
-  human-PAT `@copilot` comment, while continuing to handle same-repository PRs regardless of
-  author. It caps delegation at 3 attempts per PR across all commits; once reached, it posts a
+  commit SHA on an open, non-draft **automated** PR: either Copilot-authored on a `copilot/`
+  branch (including continuous-improvement batches), or Dependabot-authored on a `dependabot/`
+  branch. Both head and base must belong to the target repository. Human-authored PRs, unknown
+  bots, forks and missing origin metadata are skipped **before** checking failures or posting
+  delegation/escalation comments. A branch name, label or Copilot assignment alone does not opt
+  a human PR in. It caps delegation at 3 attempts per PR across all commits; once reached, it posts a
   one-time human escalation rather than re-delegating indefinitely. Environmental failures
   (such as cloud credentials or Terraform provider auth) need a human.
 - `.github/workflows/approve-copilot-runs.yml` runs `approve-copilot-workflow-runs`, which reviews

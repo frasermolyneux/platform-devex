@@ -1,5 +1,5 @@
 name: "delegate-failed-checks"
-description: "Delegates open pull requests with failed checks to the Copilot coding agent by commenting a delegation request once per failing commit, escalating to a human instead of re-delegating indefinitely once an attempt cap is reached"
+description: "Delegates same-repository Copilot and Dependabot pull requests with failed checks once per failing commit, escalating after an attempt cap; human-authored and untrusted PRs are left alone"
 
 inputs:
   github-token:
@@ -16,10 +16,6 @@ inputs:
     description: "Comma-separated pull request author logins to skip (e.g. dependabot[bot])"
     required: false
     default: ""
-  same-repository-only:
-    description: "When true, only delegate pull requests whose head and base are the same repository; fork heads and missing repository metadata are skipped. Defaults to false for callers that need the original behavior."
-    required: false
-    default: "false"
   dry-run:
     description: "When true, only report which pull requests would be delegated"
     required: false
@@ -62,7 +58,6 @@ runs:
         MENTION_TOKEN: ${{ inputs.mention-token }}
         REPOSITORY: ${{ inputs.repository }}
         EXCLUDE_AUTHORS: ${{ inputs.exclude-authors }}
-        SAME_REPOSITORY_ONLY: ${{ inputs.same-repository-only }}
         DRY_RUN: ${{ inputs.dry-run }}
         MAX_DELEGATIONS: ${{ inputs.max-delegations }}
         ESCALATION_LABEL: ${{ inputs.escalation-label }}
@@ -80,10 +75,6 @@ runs:
         # real-world cap while staying comfortably inside that range.
         if ! [[ "$MAX_DELEGATIONS" =~ ^[1-9][0-9]*$ ]] || [[ ${#MAX_DELEGATIONS} -gt 6 ]]; then
           echo "::error::max-delegations must be a positive integer with no leading zeros and at most 6 digits (max 999999), got: ${MAX_DELEGATIONS}"
-          exit 1
-        fi
-        if [[ "$SAME_REPOSITORY_ONLY" != "true" && "$SAME_REPOSITORY_ONLY" != "false" ]]; then
-          echo "::error::same-repository-only must be exactly 'true' or 'false', got: ${SAME_REPOSITORY_ONLY}"
           exit 1
         fi
 
@@ -141,13 +132,10 @@ runs:
               continue
             fi
 
-            if [[ "$SAME_REPOSITORY_ONLY" == "true" ]]; then
-              HEAD_REPO_ID=$(echo "$PR_JSON" | jq -r '.head.repo.id // empty')
-              BASE_REPO_ID=$(echo "$PR_JSON" | jq -r '.base.repo.id // empty')
-              if [[ -z "$HEAD_REPO_ID" || -z "$BASE_REPO_ID" || "$HEAD_REPO_ID" != "$BASE_REPO_ID" ]]; then
-                echo "PR #${NUM}: head is a fork or repository metadata is missing; skipping delegation"
-                continue
-              fi
+            AUTOMATION=$(node "${GITHUB_ACTION_PATH}/eligibility.mjs" "$REPOSITORY" <<< "$PR_JSON")
+            if [[ "$AUTOMATION" == "manual-or-untrusted" ]]; then
+              echo "PR #${NUM}: not a trusted same-repository Copilot or Dependabot PR; skipping delegation and escalation"
+              continue
             fi
 
             SKIP=false

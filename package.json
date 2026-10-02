@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check scripts/continuous-improvement.mjs",
+    "check": "node --check scripts/continuous-improvement.mjs && node --check .github/actions/delegate-failed-checks/eligibility.mjs",
     "test": "node --test scripts/*.test.mjs"
   },
   "dependencies": {

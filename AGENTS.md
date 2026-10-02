@@ -12,9 +12,11 @@ on and run locally vendored composite actions against each:
   "out-of-date with base branch"; does not merge them).
 - **delegate-failed-checks** — comments `@copilot investigate and resolve the failed checks on
   this pull request` once per failing commit SHA on open, non-draft pull requests with failing
-  checks whose head and base repositories match. Fork-head PRs and PRs with missing repository
-  metadata are skipped before a human-PAT comment can be posted; same-repository PRs retain their
-  prior handling regardless of author. Caps delegation at 3 attempts per pull request (across all
+  checks only when authored by Copilot on a `copilot/` branch (including improvement batches)
+  or by Dependabot on a `dependabot/` branch, with both head and base in the target repository.
+  Human PRs, unknown bots, forks and missing origin metadata are skipped before any delegation
+  or escalation comment; labels or branch names alone never authorize them.
+  Caps delegation at 3 attempts per pull request (across all
   commits); once reached, posts a one-time escalation comment instead of re-delegating
   indefinitely, since some failures (e.g. cloud credential/Terraform provider errors) are
   environmental and no code change fixes them.
@@ -90,8 +92,8 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   revoked or expired rather than removed, the fallback does not apply for `delegate-failed-checks`
   — the action's `gh api user` lookup fails and the step aborts — so replace or delete the secret
   rather than leaving a revoked value in place.
-- Maintenance composites were copied locally from `actions`; the delegation copy adds an opt-in
-  `same-repository-only` guard enabled by its workflow (default `false` for other callers). Each
+- Maintenance composites were copied locally from `actions`; the delegation copy enforces
+  automated-PR eligibility via its local `eligibility.mjs` before failed-check handling. Each
   matrix job checks out `platform-devex` at `${{ github.sha }}` with
   `persist-credentials: false` before using the local action path; `contents: read` on the default
   token is needed only for this checkout. Never check out the target repository to execute its
