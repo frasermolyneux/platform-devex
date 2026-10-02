@@ -55,6 +55,11 @@ test("check state does not treat stale commit statuses as failures", () => {
   assert.equal(checkState(checks, { state: "failure", statuses: [{ state: "failure" }] }), "failed");
   assert.equal(checkState({ check_runs: [] }, { state: "pending", statuses: [] }), "pending");
   assert.equal(checkState({ check_runs: [{ status: "in_progress" }] }, { state: "pending", statuses: [] }), "pending");
+  assert.equal(checkState({ check_runs: [{ status: "completed", conclusion: "skipped" }] },
+    { state: "pending", statuses: [] }), "pending");
+  assert.equal(checkState({ check_runs: [{ status: "completed", conclusion: "neutral" }] },
+    { state: "pending", statuses: [] }), "pending");
+  assert.equal(checkState({ check_runs: [] }, { state: "success", statuses: [{ state: "success" }] }), "passed");
 });
 
 test("analysis cannot select unknown, critical or unrelated findings", () => {
@@ -175,11 +180,12 @@ test("an active Copilot issue reconciles to a human handoff without creating ano
     }]],
     ["/repos/owner/repo/pulls/8", {
       number: 8, state: "open", updated_at: new Date().toISOString(),
-      changed_files: 1, additions: 2, deletions: 1, draft: false,
+      changed_files: 1, additions: 2, deletions: 1, draft: false, mergeable_state: "clean",
       user: { login: "Copilot" }, head: { sha: "abcd", ref: "copilot/fix", repo: { full_name: "owner/repo" } },
       base: { ref: "main", repo: { full_name: "owner/repo" } },
     }],
     ["/repos/owner/repo", { default_branch: "main" }],
+    ["/repos/owner/repo/compare/main...abcd", { behind_by: 0 }],
     ["/repos/owner/repo/issues/8/comments?per_page=100", []],
     ["/repos/owner/repo/pulls/8/files?per_page=100", [{ filename: "src/a.js" }]],
     ["/repos/owner/repo/commits/abcd/check-runs?per_page=100", {
@@ -416,6 +422,7 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
       "/repos/owner/repo": { default_branch: "main" },
       "/repos/owner/repo/issues/8/comments?per_page=100": prComments,
       "/repos/owner/repo/pulls/8/files?per_page=100": [{ filename: "src/a.js" }],
+      "/repos/owner/repo/compare/main...abcd": { behind_by: 0 },
       "/repos/owner/repo/commits/abcd/check-runs?per_page=100": {
         total_count: 1, check_runs: [{ status: "completed", conclusion: "failure" }],
       },
@@ -447,5 +454,199 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
     assert.match(writes[1].body, /human attention/);
   } finally {
     globalThis.fetch = previousFetch;
+  }
+});
+
+function mockImprovementPr() {
+  const now = new Date().toISOString();
+  const state = {
+    pr: {
+      number: 8, node_id: "PR_8", state: "open", updated_at: now, draft: true,
+      mergeable_state: "blocked", changed_files: 1, additions: 2, deletions: 1,
+      user: { login: "Copilot" },
+      head: { sha: "abcd", ref: "copilot/fix", repo: { full_name: "owner/repo" } },
+      base: { ref: "main", repo: { full_name: "owner/repo" } },
+    },
+    checks: { total_count: 1, check_runs: [{ name: "build", status: "completed", conclusion: "skipped" }] },
+    status: { state: "pending", statuses: [] },
+    behindBy: 0,
+    reviews: [],
+    inline: [],
+    issueComments: [],
+    prComments: [],
+    writes: [],
+  };
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const path = new URL(url).pathname + new URL(url).search;
+    if (init.method !== "GET") {
+      const body = JSON.parse(init.body);
+      state.writes.push({ method: init.method, path, body, token: init.headers.Authorization });
+      if (path === "/graphql") {
+        state.pr.draft = false;
+        return Response.json({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+      }
+      if (path === "/repos/owner/repo/issues/7/comments") {
+        state.issueComments.push({ user: { login: "app[bot]" }, body: body.body });
+      }
+      return Response.json({});
+    }
+    const replies = {
+      "/user": { login: "owner" },
+      "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [{
+        number: 7, body: '<!-- platform-devex-ci-batch-v1:{"alertIds":["code-scanning:1"]} -->',
+        user: { login: "owner" }, created_at: now,
+      }],
+      "/repos/owner/repo/issues/7/comments?per_page=100": state.issueComments,
+      "/repos/owner/repo/issues/7/timeline?per_page=100": [{
+        event: "cross-referenced", source: { issue: { number: 8, pull_request: {} } },
+      }],
+      "/repos/owner/repo/pulls/8": state.pr,
+      "/repos/owner/repo": { default_branch: "main" },
+      "/repos/owner/repo/issues/8/comments?per_page=100": state.prComments,
+      "/repos/owner/repo/pulls/8/files?per_page=100": [{ filename: "src/a.js" }],
+      [`/repos/owner/repo/compare/main...${state.pr.head.sha}`]: { behind_by: state.behindBy },
+      [`/repos/owner/repo/commits/${state.pr.head.sha}/check-runs?per_page=100`]: state.checks,
+      [`/repos/owner/repo/commits/${state.pr.head.sha}/status`]: state.status,
+      "/repos/owner/repo/pulls/8/reviews?per_page=100": state.reviews,
+      "/repos/owner/repo/pulls/8/comments?per_page=100": state.inline,
+    };
+    assert.ok(path in replies, `unexpected request: ${path}`);
+    return Response.json(replies[path]);
+  };
+  const run = (dryRun = "false") => main({
+    CI_MODE: "reconcile", CI_REPOSITORIES: "repo", CI_REPOSITORY: "repo",
+    GITHUB_REPOSITORY_OWNER: "owner", CI_DRY_RUN: dryRun,
+    APP_TOKEN: "app", APP_BOT_LOGIN: "app[bot]", COPILOT_AGENT_PAT: "human",
+  });
+  return { state, run, restore: () => { globalThis.fetch = previousFetch; } };
+}
+
+test("trusted draft becomes ready, skipped-only checks cannot pass, and handoff waits for green checks and review", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    await run("true");
+    assert.equal(state.writes.length, 0);
+    assert.equal(state.pr.draft, true);
+    await run();
+    assert.equal(state.writes[0].path, "/graphql");
+    assert.equal(state.writes[0].token, "Bearer human");
+    assert.equal(state.writes[0].body.variables.id, "PR_8");
+    await run();
+    assert.equal(state.writes.length, 1);
+    state.checks = { total_count: 2, check_runs: [
+      { name: "build", status: "completed", conclusion: "success" },
+      { name: "optional", status: "completed", conclusion: "skipped" },
+    ] };
+    await run();
+    assert.equal(state.writes[1].path, "/repos/owner/repo/pulls/8/requested_reviewers");
+    assert.deepEqual(state.writes[1].body.reviewers, ["copilot-pull-request-reviewer[bot]"]);
+    assert.equal(state.writes[2].path, "/repos/owner/repo/issues/7/comments");
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    await run();
+    assert.equal(state.writes.length, 3);
+    state.pr.mergeable_state = "clean";
+    await run();
+    assert.equal(state.writes[3].path, "/repos/owner/repo/issues/7/comments");
+    assert.match(state.writes[3].body.body, /ready for \*\*human\*\* review and merge/);
+    assert.match(state.writes[3].body.body, /Passing checks: build/);
+    assert.doesNotMatch(state.writes[3].body.body, /optional/);
+    await run();
+    assert.equal(state.writes.length, 4);
+  } finally {
+    restore();
+  }
+});
+
+test("behind branch is updated before readiness, and base changes before handoff prevent a stale handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.behindBy = 1;
+    await run();
+    assert.equal(state.writes[0].method, "PUT");
+    assert.equal(state.writes[0].path, "/repos/owner/repo/pulls/8/update-branch");
+    assert.equal(state.writes[0].body.expected_head_sha, "abcd");
+    assert.equal(state.writes[0].token, "Bearer human");
+    state.behindBy = 0;
+    await run();
+    assert.equal(state.writes[1].path, "/graphql");
+    state.checks.check_runs[0].conclusion = "success";
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    state.pr.mergeable_state = "clean";
+    let comparisons = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (new URL(url).pathname.includes("/compare/")) {
+        comparisons++;
+        return Response.json({ behind_by: comparisons === 1 ? 0 : 1 });
+      }
+      return originalFetch(url, init);
+    };
+    await run();
+    assert.equal(comparisons, 2);
+    assert.equal(state.writes[2].path, "/repos/owner/repo/pulls/8/update-branch");
+    assert.equal(state.writes.some((write) => write.body.body?.includes("platform-devex-ci-ready:")), false);
+  } finally {
+    restore();
+  }
+});
+
+test("Copilot changes-requested review without inline findings escalates instead of handing off", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.pr.draft = false;
+    state.checks.check_runs[0].conclusion = "success";
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "CHANGES_REQUESTED" });
+    await run();
+    assert.equal(state.writes.length, 1);
+    assert.match(state.writes[0].body.body, /needs human attention/);
+    assert.doesNotMatch(state.writes[0].body.body, /platform-devex-ci-ready:/);
+  } finally {
+    restore();
+  }
+});
+
+test("a new head during reconciliation cannot receive a stale human handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.pr.draft = false;
+    state.pr.mergeable_state = "clean";
+    state.checks.check_runs[0].conclusion = "success";
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    const originalFetch = globalThis.fetch;
+    let reads = 0;
+    globalThis.fetch = (url, init) => {
+      if (new URL(url).pathname === "/repos/owner/repo/pulls/8" && ++reads === 2) {
+        return Promise.resolve(Response.json({ ...state.pr, head: { ...state.pr.head, sha: "new" } }));
+      }
+      return originalFetch(url, init);
+    };
+    await run();
+    assert.equal(reads, 2);
+    assert.equal(state.writes.length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("a PR already handed off does not escalate just because a human has not yet reviewed it", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.pr.draft = false;
+    state.pr.mergeable_state = "clean";
+    state.pr.updated_at = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    state.checks.check_runs[0].conclusion = "success";
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    state.issueComments.push({ user: { login: "app[bot]" },
+      body: "<!-- platform-devex-ci-ready:abcd -->" });
+    await run();
+    assert.equal(state.writes.length, 0);
+  } finally {
+    restore();
   }
 });

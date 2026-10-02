@@ -106,10 +106,13 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
 - New batch issues carry the `platform-devex-ci` label in addition to their body marker; query
   this label when locating open/closed batches so unrelated issues in the same repository do not
   exhaust pagination. Do not remove the label from an in-progress issue.
-- The improvement controller handles draft Copilot PR failures and non-draft failures outside
-  the sweep's check-run criteria with up to three same-SHA deduplicated human-PAT mentions; the
-  separate failed-check action handles non-draft check-run failures. Draft PRs rely on automatic
-  Copilot review of drafts/new pushes, or a human marking them ready.
+- The improvement controller updates behind branches and marks small, trusted, same-repository
+  Copilot draft PRs ready using the human PAT (Contents/Pull requests: write); target workflows
+  must run real validation on `ready_for_review`. All-skipped checks are not green. Recheck the
+  PR SHA, branch freshness and GitHub merge requirements before handing off for human review.
+  Draft PR check failures and non-draft failures outside the sweep's check-run criteria get up
+  to three same-SHA deduplicated human-PAT mentions; the separate failed-check action handles
+  non-draft check-run failures. Copilot reviews are requested after passing validation.
 - The single user-owned `COPILOT_AGENT_PAT` needs Metadata: read, Actions, Contents, Issues
   and Pull requests: read/write on every opted-in repository for the preview issue-assignment
   API, plus account-level Copilot Requests: read for CLI review. Never provision it through

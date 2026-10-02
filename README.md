@@ -53,24 +53,29 @@ whose source files no longer exist on the default branch are skipped with a warn
 issues are assigned to Copilot, with a requirement to preserve functionality, architecture and
 cost and run the target repository's relevant unit, integration and Playwright tests. Batch issues
 carry a `platform-devex-ci` label so reconciliation does not page through unrelated issue history.
-The improvement reconciler handles failed checks on its **draft** Copilot PRs and non-draft
+The improvement reconciler checks that its trusted, same-repository Copilot PR has a small,
+non-sensitive diff, updates its branch if behind, and marks a draft ready for review. This
+triggers repositories whose validation workflows skip drafts but run on `ready_for_review`.
+Skipped-only checks do not count as passing. It handles failed checks on drafts and non-draft
 failures outside the sweep's check-run criteria (at most three attempts); the separate
-failed-check workflow handles non-draft check-run failures. It waits for automatic Copilot review of
-draft PRs, or requests a fresh review on a ready PR, delegates inline review findings at most
-twice, and escalates stalled, oversized, CI-changing or unresolved work.
-When checks pass and the latest review has no inline findings, it posts a handoff containing
-alert IDs, changed files and check names. **A human reviews and merges the PR.** After merging,
+failed-check workflow handles non-draft check-run failures. After real validation passes, it
+requests a review of the latest commit from Copilot, delegates inline findings at most twice,
+and escalates stalled, oversized, CI-changing or unresolved work. It rechecks the PR's SHA,
+branch freshness and GitHub merge requirements before posting a human handoff containing
+alert IDs, changed files and passing check names. Optional skipped jobs are not reported as
+passing. **A human reviews and merges the PR.** After merging,
 the controller waits for the target alerts to disappear on the default branch before closing
 the issue. An incomplete run is reported on this repository's "Continuous improvement activity
 log" issue; unavailable scanners are never treated as clean results.
 
 Before opting in a repository:
 
-1. Ensure its test and scan workflows run on Copilot PRs and enforce the desired branch checks.
-   Enable automatic Copilot code review for draft PRs and new pushes if the handoff should
-   happen before a human marks the PR ready; otherwise the draft remains pending until a
-   human does so. A Copilot `COMMENTED` review without inline findings is **not** a formal
-   approval: the final review and merge are always human decisions.
+1. Ensure its test and scan workflows run on ready Copilot PRs (including the
+   `ready_for_review` event if they skip drafts) and enforce the desired branch checks.
+   The controller requests Copilot review after passing validation, including after new
+   commits; automatic draft review is not required. A Copilot `COMMENTED` review without
+   inline findings is **not** a formal approval: the final review and merge are always
+   human decisions.
    The workflow reads GitHub code-scanning/SARIF and Dependabot alerts; external services such
    as SonarCloud require a separate integration. Both alert sources are required by default.
    If only one is intentionally configured, set `CI_SCAN_SOURCES` to `code-scanning` or
@@ -116,9 +121,9 @@ step (`.../actions/runs/{id}/rerun`) still needs an authenticated Copilot CLI ca
 same human account, to produce its risk-review verdict. Since the maintenance workflows otherwise
 run on the shared GitHub App's installation tokens, one fine-grained personal access token
 (`secrets.COPILOT_AGENT_PAT`) is used for the delegation comment, the CLI risk-review call,
-the improvement controller's Copilot issue assignment and PR follow-up comments, and the
-restricted SDK analysis session. The
-improvement controller uses its scoped App token for target reads and review requests;
+the improvement controller's Copilot issue assignment, PR follow-up comments, ready-for-review
+transition and branch updates, and the restricted SDK analysis session. The improvement
+controller uses its scoped App token for target reads and review requests;
 discovery, `stale-branch-sweep`, the maintenance actions' read-only lookups, the pending-run
 release call and audit comment, and the delegation fallback comment use the App token.
 

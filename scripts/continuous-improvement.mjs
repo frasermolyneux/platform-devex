@@ -40,12 +40,12 @@ export function checkState(checks, status) {
   if (!Array.isArray(runs) || !Array.isArray(status.statuses)) {
     throw new Error("Invalid check run or commit status response");
   }
-  if (!runs.length && !status.statuses.length) return "pending";
   if (runs.some((run) => run.status === "completed" && !["success", "neutral", "skipped"].includes(run.conclusion)) ||
       ["failure", "error"].includes(status.state)) return "failed";
   if (runs.some((run) => run.status !== "completed") ||
       (status.statuses.length > 0 && status.state === "pending")) return "pending";
-  return "passed";
+  return runs.some((run) => run.conclusion === "success") ||
+    (status.statuses.length > 0 && status.state === "success") ? "passed" : "pending";
 }
 
 export function validateProposal(proposal, alerts) {
@@ -313,13 +313,42 @@ async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dry
   if (!dryRun) await api.request(`/repos/${repo}/issues/${issue.number}/comments`, {
     method: "POST",
     body: { body: [
-      marker, `PR #${pr.number} is ready for **human** review${pr.draft ? " (mark draft ready before merging)" : ""}.`,
+      marker, `PR #${pr.number} is ready for **human** review and merge.`,
       `Findings: ${batch.alertIds.join(", ")}`,
       `Changed files: ${files.map((file) => clean(file.filename)).join(", ")}`,
-      `Passing checks: ${checks.check_runs.map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
+      `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success").map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
       "Copilot reviewed the latest commit without inline findings. Check its review assessment and verify unit, integration and Playwright coverage as appropriate before merging.",
     ].join("\n") },
   });
+}
+
+async function updateIfBehind(app, human, repo, issue, pr, dryRun) {
+  const comparison = await app.request(`/repos/${repo}/compare/${encodeURIComponent(pr.base.ref)}...${encodeURIComponent(pr.head.sha)}`);
+  if (!Number.isSafeInteger(comparison.behind_by) || comparison.behind_by < 0) {
+    throw new Error(`${repo}#${pr.number}: invalid branch comparison`);
+  }
+  if (comparison.behind_by === 0) return false;
+  await note(`${repo}#${issue.number}: ${dryRun ? "would update" : "updating"} PR #${pr.number} with ${pr.base.ref} (${comparison.behind_by} commits behind).`);
+  if (!dryRun) await human.request(`/repos/${repo}/pulls/${pr.number}/update-branch`, {
+    method: "PUT", body: { expected_head_sha: pr.head.sha },
+  });
+  return true;
+}
+
+async function markReady(human, repo, issue, pr, dryRun) {
+  if (!pr.node_id) throw new Error(`${repo}#${pr.number}: missing pull request node ID`);
+  await note(`${repo}#${issue.number}: ${dryRun ? "would mark" : "marking"} trusted PR #${pr.number} ready for review.`);
+  if (dryRun) return;
+  const response = await human.request("/graphql", {
+    method: "POST",
+    body: {
+      query: "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}",
+      variables: { id: pr.node_id },
+    },
+  });
+  if (response.errors?.length || response.data?.markPullRequestReadyForReview?.pullRequest?.isDraft !== false) {
+    throw new Error(`${repo}#${pr.number}: could not mark pull request ready: ${JSON.stringify(response.errors ?? response)}`);
+  }
 }
 
 async function delegateCheckFailure(human, app, repo, issue, pr, sha, prComments, dryRun, appLogin) {
@@ -384,7 +413,8 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     await escalate(app, repo, issue, `PR #${pr.number} exhausted failed-check fixes`, dryRun, appLogin);
     return;
   }
-  if (timedOut(pr.updated_at)) {
+  if (timedOut(pr.updated_at) && !existing.some((comment) =>
+    comment.user?.login === appLogin && comment.body?.includes(`${READY_MARKER}${pr.head.sha} -->`))) {
     await escalate(app, repo, issue, `PR #${pr.number} has not progressed for 48 hours`, dryRun, appLogin);
     return;
   }
@@ -394,12 +424,17 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     await escalate(app, repo, issue, `PR #${pr.number}: ${risk}`, dryRun, appLogin);
     return;
   }
+  if (await updateIfBehind(app, human, repo, issue, pr, dryRun)) return;
   const [checks, status] = await Promise.all([
     app.request(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`),
     app.request(`/repos/${repo}/commits/${sha}/status`),
   ]);
   if (checks.total_count > 100) throw new Error(`${repo}#${pr.number}: more than 100 check runs; refusing partial results`);
   const state = checkState(checks, status);
+  if (pr.draft && state !== "failed") {
+    await markReady(human, repo, issue, pr, dryRun);
+    return;
+  }
   if (state !== "passed") {
     const handledBySweep = checks.check_runs.some((run) =>
       ["failure", "timed_out", "startup_failure"].includes(run.conclusion));
@@ -412,13 +447,8 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
   }
   const reviews = await app.pages(`/repos/${repo}/pulls/${pr.number}/reviews`);
   const currentReview = reviews.findLast((review) =>
-    review.user?.login === COPILOT_REVIEWER && review.commit_id === sha &&
-    ["COMMENTED", "APPROVED"].includes(review.state));
+    review.user?.login === COPILOT_REVIEWER && review.commit_id === sha);
   if (!currentReview) {
-    if (pr.draft) {
-      await note(`${repo}#${issue.number}: awaiting Copilot's automatic draft-PR review at ${sha}.`);
-      return;
-    }
     const marker = `${REVIEW_MARKER}${sha} -->`;
     if (!existing.some((comment) => comment.user?.login === appLogin && comment.body?.includes(marker))) {
       await note(`${repo}#${issue.number}: requesting Copilot review of PR #${pr.number} at ${sha}.`);
@@ -436,6 +466,14 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
   const inline = await app.pages(`/repos/${repo}/pulls/${pr.number}/comments`);
   const findings = inline.filter((comment) =>
     comment.user?.login === COPILOT_REVIEWER && comment.commit_id === sha);
+  if (currentReview.state === "CHANGES_REQUESTED" && !findings.length) {
+    await escalate(app, repo, issue, `PR #${pr.number} has a Copilot changes-requested review without actionable inline findings`, dryRun, appLogin);
+    return;
+  }
+  if (!["COMMENTED", "APPROVED", "CHANGES_REQUESTED"].includes(currentReview.state)) {
+    await note(`${repo}#${issue.number}: waiting for a completed Copilot review of PR #${pr.number} at ${sha}.`);
+    return;
+  }
   if (findings.length) {
     const fixes = prComments.filter((comment) => comment.body?.includes(FIX_MARKER) &&
       comment.user?.login === human.login);
@@ -453,7 +491,18 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     }
     return;
   }
-  await readyComment(app, repo, issue, batch, pr, sha, files, checks, dryRun, appLogin);
+  const latest = await app.request(`/repos/${repo}/pulls/${pr.number}`);
+  if (latest.state !== "open" || latest.draft || latest.head.sha !== sha ||
+      latest.base.ref !== defaultBranch || latest.base.repo.full_name !== repo) {
+    await note(`${repo}#${issue.number}: PR #${pr.number} changed during reconciliation; retrying on its latest state.`);
+    return;
+  }
+  if (await updateIfBehind(app, human, repo, issue, latest, dryRun)) return;
+  if (latest.mergeable_state !== "clean") {
+    await note(`${repo}#${issue.number}: PR #${pr.number} is ${latest.mergeable_state}; waiting for GitHub's merge requirements before handoff.`);
+    return;
+  }
+  await readyComment(app, repo, issue, batch, latest, sha, files, checks, dryRun, appLogin);
 }
 
 export async function analyze(alerts, createClient = async (options) => {
