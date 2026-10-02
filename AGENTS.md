@@ -27,7 +27,10 @@ on and run locally vendored composite actions against each:
   when the current PR is a same-repository Copilot PR linked to an active labeled improvement
   issue authored by that owner. All eligible runs pass a deterministic CI-file denylist and an automated Copilot CLI
   risk review of the pending run's event-base-to-head diff when that base is recorded (with a
-  logged current-PR-base fallback); anything ambiguous is left pending.
+  logged current-PR-base fallback); anything ambiguous is left pending. Release only the latest
+  original `pull_request` event per workflow for the current non-draft head, including all
+  statuses when selecting the latest event. Never order by rerun time/attempt: old draft
+  snapshots can skip jobs and cancel newer real validation. Recheck current PR/run state before release.
 - Each workflow's **summarize** job collects its own per-repository activity (or failures) into
   one run-specific comment on this repository's "Self-heal activity log" tracking issue, using
   the default `github.token` (not the App token) since it only ever writes to this repository.
@@ -117,7 +120,15 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   exhaust pagination. Do not remove the label from an in-progress issue.
 - The improvement controller updates behind branches and marks small, trusted, same-repository
   Copilot draft PRs ready using the human PAT (Contents/Pull requests: write); target workflows
-  must run real validation on `ready_for_review`. All-skipped checks are not green. Recheck the
+  must run real validation on `ready_for_review`. All-skipped checks and Copilot's own
+  agent/review jobs are not passing validation. Cancelled checks are orchestration failures,
+  never Copilot code-fix requests. Rerun only the latest current-head PR event, previously
+  released by this App, with its scoped Actions: write token. Reserve each attempt on the batch
+  issue before the API call; trust only this App's markers and cap retries at two per run/head.
+  Never rerun active or approval-required runs, and recheck PR/head/origin/run state before
+  writing. Ignore obsolete cancelled contexts only with a newer successful event of that
+  workflow; real checks and merge requirements still gate handoff. Unmapped cancellations,
+  uncertain retry outcomes and exhausted budgets require human attention. Recheck the
   PR SHA, branch freshness and GitHub merge requirements before handing off for human review.
   Draft PR check failures and non-draft failures outside the sweep's check-run criteria get up
   to three same-SHA deduplicated human-PAT mentions; the separate failed-check action handles
@@ -132,7 +143,8 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   Terraform. The improvement SDK uses this PAT only as session identity, with no tools or custom
   instructions, rejecting permission requests and stripping tokens from the child environment.
   The scoped App token needs the
-  opted-in repository's scanning and issue/PR/check permissions; its installation permissions
+  opted-in repository's scanning and issue/PR/check permissions plus Actions: write for bounded
+  workflow recovery; its installation permissions
   are changed in `platform-workloads`.
 - Keep `permissions: {}` at the workflow level. Maintenance discover jobs need no default-token
   permissions; the improvement discover job needs `contents: read` to check out its controller.

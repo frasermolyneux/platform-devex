@@ -85,6 +85,7 @@ jobs:
           permission-issues: write
           permission-pull-requests: write
           permission-checks: read
+          permission-actions: write
           permission-statuses: read
           permission-security-events: read
           permission-vulnerability-alerts: read

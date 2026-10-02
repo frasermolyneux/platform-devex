@@ -2,6 +2,7 @@ import { appendFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { collectWorkflowRuns, latestPullRequestRuns } from "../.github/actions/approve-copilot-workflow-runs/workflow-runs.mjs";
 
 const BATCH_MARKER = "platform-devex-ci-batch-v1";
 const BATCH_LABEL = "platform-devex-ci";
@@ -10,6 +11,7 @@ const REVIEW_MARKER = "<!-- platform-devex-ci-review:";
 const FIX_MARKER = "<!-- platform-devex-ci-fix:";
 const READY_MARKER = "<!-- platform-devex-ci-ready:";
 const VERIFIED_MARKER = "<!-- platform-devex-ci-verified -->";
+const RERUN_MARKER = "<!-- platform-devex-ci-rerun:";
 const DELEGATE_MARKER = "<!-- devex-copilot-delegate -->";
 const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
 const COPILOT_REVIEW_CHECK = "copilot-pull-request-reviewer";
@@ -19,6 +21,7 @@ const SCAN_SOURCES = ["code-scanning", "dependabot", "sonarcloud"];
 const MAX_BATCH = 4;
 const MAX_CONTEXT = 12;
 const MAX_FIXES = 2;
+const MAX_CI_RETRIES = 2;
 const MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const SEVERITY_PRIORITY = { high: 4, major: 3, medium: 2, minor: 1, low: 1, info: 0 };
 
@@ -50,11 +53,16 @@ export function checkState(checks, status) {
   if (!Array.isArray(runs) || !Array.isArray(status.statuses)) {
     throw new Error("Invalid check run or commit status response");
   }
-  if (runs.some((run) => run.status === "completed" && !["success", "neutral", "skipped"].includes(run.conclusion)) ||
+  if (runs.some((run) => run.status === "completed" &&
+      ["failure", "timed_out", "startup_failure"].includes(run.conclusion)) ||
       ["failure", "error"].includes(status.state)) return "failed";
   if (runs.some((run) => run.status !== "completed") ||
+      runs.some((run) => run.conclusion === "action_required") ||
       (status.statuses.length > 0 && status.state === "pending")) return "pending";
-  return runs.some((run) => run.conclusion === "success" && run.name !== COPILOT_REVIEW_CHECK) ||
+  if (runs.some((run) => run.conclusion === "cancelled")) return "cancelled";
+  if (runs.some((run) => !["success", "neutral", "skipped"].includes(run.conclusion))) return "blocked";
+  return runs.some((run) => run.conclusion === "success" &&
+    !["copilot", COPILOT_REVIEW_CHECK].includes(run.name)) ||
     (status.statuses.length > 0 && status.state === "success") ? "passed" : "pending";
 }
 
@@ -120,7 +128,7 @@ class GitHubApi {
     this.token = token;
   }
 
-  async request(path, { method = "GET", body, withLink = false } = {}) {
+  async request(path, { method = "GET", body, withLink = false, emptyResponse = false } = {}) {
     const response = await fetch(`https://api.github.com${path}`, {
       method,
       headers: {
@@ -133,7 +141,7 @@ class GitHubApi {
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) throw new Error(`GitHub ${method} ${path} returned HTTP ${response.status}`);
-    const data = response.status === 204 ? null : await response.json();
+    const data = response.status === 204 || emptyResponse ? null : await response.json();
     return withLink ? { data, link: response.headers.get("link") } : data;
   }
 
@@ -148,6 +156,19 @@ class GitHubApi {
       if (!next) return result;
     }
     throw new Error(`More than 1000 results from ${path}; refusing to use incomplete data`);
+  }
+
+  async workflowRuns(repo, sha) {
+    const path = `/repos/${repo}/actions/runs`;
+    let next = `${path}?event=pull_request&head_sha=${encodeURIComponent(sha)}&per_page=100`;
+    const pages = [];
+    for (let page = 1; page <= 10; page++) {
+      const { data, link } = await this.request(next, { withLink: true });
+      pages.push(data);
+      next = nextPage(link, path);
+      if (!next) return collectWorkflowRuns(pages);
+    }
+    throw new Error(`${repo}: more than 1000 workflow runs; refusing incomplete recovery history`);
   }
 }
 
@@ -459,7 +480,7 @@ async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dry
       marker, `PR #${pr.number} is ready for **human** review and merge.`,
       `Findings: ${batch.alertIds.join(", ")}`,
       `Changed files: ${files.map((file) => clean(file.filename)).join(", ")}`,
-      `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success" && run.name !== COPILOT_REVIEW_CHECK).map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
+      `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success" && !["copilot", COPILOT_REVIEW_CHECK].includes(run.name)).map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
       "Copilot reviewed the latest commit; no unresolved inline findings remain. Check its review assessment and verify unit, integration and Playwright coverage as appropriate before merging.",
     ].join("\n") },
   });
@@ -524,6 +545,72 @@ async function delegateCheckFailure(human, app, repo, issue, pr, sha, prComments
     method: "POST",
     body: { body: `${DELEGATE_MARKER}<!-- sha:${sha} -->\n@copilot investigate and resolve the failed checks on this pull request. Preserve the issue's narrow scope and run relevant tests.` },
   });
+}
+
+async function recoverCancelledChecks(app, repo, issue, pr, checks, existing, dryRun, appLogin) {
+  const sha = pr.head.sha;
+  const cancelledSuites = new Set(checks.check_runs.filter((check) =>
+    check.conclusion === "cancelled" && check.app?.slug === "github-actions").map((check) => check.check_suite?.id));
+  const history = await app.workflowRuns(repo, sha);
+  const latest = latestPullRequestRuns(history, pr.number, sha);
+  const candidates = latest.filter((run) => run.status === "completed" && run.conclusion === "cancelled" &&
+    Number.isSafeInteger(run.check_suite_id) && cancelledSuites.has(run.check_suite_id));
+  if (!candidates.length) {
+    const obsoleteSuites = new Set(history.filter((run) =>
+      run.event === "pull_request" && run.head_sha === sha &&
+      run.pull_requests?.some((item) => item.number === pr.number) &&
+      latest.some((current) => current.workflow_id === run.workflow_id && current.id !== run.id &&
+        current.status === "completed" && current.conclusion === "success"))
+      .map((run) => run.check_suite_id).filter(Number.isSafeInteger));
+    const cancellations = checks.check_runs.filter((check) => check.conclusion === "cancelled");
+    if (cancellations.every((check) =>
+      check.app?.slug === "github-actions" && obsoleteSuites.has(check.check_suite?.id))) {
+      await note(`${repo}#${issue.number}: ignoring obsolete cancelled checks superseded by successful current validation.`);
+      return { ...checks, check_runs: checks.check_runs.filter((check) => check.conclusion !== "cancelled") };
+    }
+    if (latest.some((run) => run.status !== "completed" || run.conclusion === "action_required")) {
+      await note(`${repo}#${issue.number}: current validation is active or awaiting approval; not retrying obsolete cancellations.`);
+    } else {
+      await escalate(app, repo, issue, "Cancelled checks have no current rerunnable GitHub Actions workflow", dryRun, appLogin);
+    }
+    return;
+  }
+  for (const run of candidates) {
+    if (!Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
+      throw new Error(`${repo}#${pr.number}: invalid workflow run attempt`);
+    }
+    if (run.run_attempt <= 1 || run.triggering_actor?.login !== appLogin) {
+      await escalate(app, repo, issue, `Cancelled workflow run ${run.id} was not previously released by the trusted App; human review required`, dryRun, appLogin);
+      return;
+    }
+    const prefix = `${RERUN_MARKER}${run.id}:${sha}:`;
+    const attempts = existing.filter((comment) => comment.user?.login === appLogin && comment.body?.includes(prefix));
+    const marker = `${prefix}${run.run_attempt} -->`;
+    if (attempts.length >= MAX_CI_RETRIES || attempts.some((comment) => comment.body?.includes(marker))) {
+      await escalate(app, repo, issue, `Workflow run ${run.id} remains cancelled after its bounded retry budget`, dryRun, appLogin);
+      return;
+    }
+    const currentRun = await app.request(`/repos/${repo}/actions/runs/${run.id}`);
+    const currentLatest = latestPullRequestRuns(await app.workflowRuns(repo, sha), pr.number, sha);
+    const currentPr = await app.request(`/repos/${repo}/pulls/${pr.number}`);
+    if (currentPr.state !== "open" || currentPr.draft || currentPr.head?.sha !== sha ||
+        currentPr.head.repo?.full_name !== repo || currentPr.base.repo?.full_name !== repo ||
+        currentPr.base.ref !== pr.base.ref || currentPr.base.sha !== pr.base.sha ||
+        currentRun.status !== "completed" ||
+        currentRun.conclusion !== "cancelled" || currentRun.run_attempt !== run.run_attempt ||
+        !currentLatest.some((latestRun) => latestRun.workflow_id === run.workflow_id && latestRun.id === run.id)) {
+      await note(`${repo}#${issue.number}: validation changed during recovery; retrying reconciliation on its latest state.`);
+      return;
+    }
+    await note(`${repo}#${issue.number}: ${dryRun ? "would rerun" : "rerunning"} cancelled workflow ${run.id} (${attempts.length + 1}/${MAX_CI_RETRIES}); no code change requested.`);
+    if (!dryRun) {
+      await app.request(`/repos/${repo}/issues/${issue.number}/comments`, {
+        method: "POST",
+        body: { body: `${marker}\nRetrying cancelled validation run ${run.id} for PR #${pr.number} at ${sha} (${attempts.length + 1}/${MAX_CI_RETRIES}). This is a workflow retry, not a code-change request.` },
+      });
+      await app.request(`/repos/${repo}/actions/runs/${run.id}/rerun`, { method: "POST", emptyResponse: true });
+    }
+  }
 }
 
 async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabledSources, sonarToken) {
@@ -622,14 +709,24 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     return;
   }
   if (await updateIfBehind(app, human, repo, issue, pr, dryRun)) return;
-  const [checks, status] = await Promise.all([
+  let [checks, status] = await Promise.all([
     app.request(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`),
     app.request(`/repos/${repo}/commits/${sha}/status`),
   ]);
   if (checks.total_count > 100) throw new Error(`${repo}#${pr.number}: more than 100 check runs; refusing partial results`);
-  const state = checkState(checks, status);
+  let state = checkState(checks, status);
   if (pr.draft && state !== "failed") {
     await markReady(human, repo, issue, pr, dryRun);
+    return;
+  }
+  if (state === "cancelled") {
+    const currentChecks = await recoverCancelledChecks(app, repo, issue, pr, checks, existing, dryRun, appLogin);
+    if (!currentChecks) return;
+    checks = currentChecks;
+    state = checkState(checks, status);
+  }
+  if (state === "blocked") {
+    await escalate(app, repo, issue, `PR #${pr.number} has unsupported check conclusions requiring human attention`, dryRun, appLogin);
     return;
   }
   if (state !== "passed") {

@@ -32,7 +32,11 @@ from `.github/actions/`:
   absent). Runs triggered when the repository owner marks an improvement PR ready are also
   eligible **only** for a current, same-repository Copilot PR linked to an open, labeled batch
   issue authored by that owner; they pass the same denylist and risk review. Ambiguous or unsafe
-  changes remain pending for a human.
+  changes remain pending for a human. Only the latest original `pull_request` event per
+  workflow on the current, non-draft PR head can be released. Older draft events are skipped
+  even if rerun more recently; reruns preserve their original draft snapshot and can otherwise
+  cancel current validation through workflow concurrency. The PR and latest run are rechecked
+  immediately before release.
 
 Each matrix tolerates other repositories failing (`fail-fast: false`). Each workflow uploads
 activity or failure results per repository and posts one run-specific comment to the existing
@@ -71,7 +75,15 @@ PR check alone never counts as a resolved finding.
 The improvement reconciler checks that its trusted, same-repository Copilot PR has a small,
 non-sensitive diff, updates its branch if behind, and marks a draft ready for review. This
 triggers repositories whose validation workflows skip drafts but run on `ready_for_review`.
-Skipped-only checks do not count as passing. It handles failed checks on drafts and non-draft
+Skipped-only checks and Copilot's own agent/review jobs do not count as passing validation.
+Cancelled checks are handled as orchestration failures, not requests for code changes: the
+controller retries only the latest current-head workflow event that was already released by
+the trusted App, using that repository's App token. Retries are capped at two per run/head,
+with an App-authored reservation on the batch issue before each API call. Active or
+approval-required runs are left alone. Obsolete cancelled contexts may be ignored only when
+the same workflow has a newer successful event; real passing checks and GitHub merge
+requirements still apply. Unmappable cancellations, uncertain retry outcomes and exhausted
+budgets escalate to a human. It handles failed checks on drafts and non-draft
 failures outside the sweep's check-run criteria (at most three attempts); the separate
 failed-check workflow handles non-draft check-run failures. After real validation passes, it
 requests a review of the latest commit from Copilot, delegates inline findings at most twice,
@@ -107,7 +119,8 @@ Before opting in a repository:
    disabling the source of an in-flight batch prevents post-merge verification.
 2. Grant the shared GitHub App **Security events: read** (code scanning), **Dependabot alerts:
    read** (vulnerability alerts), **Issues: write**, **Pull requests: write**, **Checks: read**,
-   **Commit statuses: read**, and **Contents: read** on opted-in repositories. The App is
+   **Commit statuses: read**, **Contents: read**, and **Actions: write** (bounded validation
+   recovery) on opted-in repositories. The App is
    provisioned by `platform-workloads`; change its permissions there, not by adding Terraform
    here. If token minting fails, no batch is created and the failure is reported.
 3. Expand the existing `COPILOT_AGENT_PAT` fine-grained token to cover all opted-in
@@ -149,7 +162,7 @@ run on the shared GitHub App's installation tokens, one fine-grained personal ac
 the improvement controller's Copilot issue assignment, PR follow-up comments,
 ready-for-review transition, branch updates and review-thread resolution, and the
 restricted SDK analysis session. The improvement controller uses its scoped App token
-for target reads and review requests;
+for target reads, review requests and bounded cancelled-validation reruns;
 discovery, `stale-branch-sweep`, the maintenance actions' read-only lookups, the pending-run
 release call and audit comment, and the delegation fallback comment use the App token.
 

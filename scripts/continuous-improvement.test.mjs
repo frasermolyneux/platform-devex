@@ -73,6 +73,20 @@ test("check state does not treat stale commit statuses as failures", () => {
   assert.equal(checkState({ check_runs: [] }, { state: "success", statuses: [{ state: "success" }] }), "passed");
 });
 
+test("cancelled and approval-required checks never become code-fix requests or passing checks", () => {
+  const status = { state: "pending", statuses: [] };
+  const cancelled = { name: "build", status: "completed", conclusion: "cancelled" };
+  assert.equal(checkState({ check_runs: [cancelled] }, status), "cancelled");
+  assert.equal(checkState({ check_runs: [cancelled, { status: "in_progress" }] }, status), "pending");
+  assert.equal(checkState({ check_runs: [cancelled, { status: "completed", conclusion: "failure" }] }, status), "failed");
+  assert.equal(checkState({ check_runs: [{ ...cancelled, conclusion: "action_required" }] }, status), "pending");
+  assert.equal(checkState({ check_runs: [{ ...cancelled, conclusion: "stale" }] }, status), "blocked");
+  assert.equal(checkState({ check_runs: [
+    { name: "copilot", status: "completed", conclusion: "success" },
+    { name: "build", status: "completed", conclusion: "skipped" },
+  ] }, status), "pending");
+});
+
 test("analysis cannot select unknown, critical or unrelated findings", () => {
   const alerts = [
     { id: "code-scanning:1", severity: "medium", path: "src/a.js" },
@@ -802,13 +816,15 @@ function mockImprovementPr() {
     threads: [],
     issueComments: [],
     prComments: [],
+    workflowRuns: [],
+    files: [{ filename: "src/a.js" }],
     writes: [],
   };
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const path = new URL(url).pathname + new URL(url).search;
     if (init.method !== "GET") {
-      const body = JSON.parse(init.body);
+      const body = init.body ? JSON.parse(init.body) : null;
       if (path === "/graphql" && body.query.startsWith("query(")) {
         return Response.json({ data: { repository: { pullRequest: { reviewThreads: {
           nodes: state.threads, pageInfo: { hasNextPage: false },
@@ -832,6 +848,15 @@ function mockImprovementPr() {
       if (path === "/repos/owner/repo/issues/7/comments") {
         state.issueComments.push({ user: { login: "app[bot]" }, body: body.body });
       }
+      const rerun = path.match(/^\/repos\/owner\/repo\/actions\/runs\/(\d+)\/rerun$/);
+      if (rerun) {
+        const workflow = state.workflowRuns.find((run) => run.id === Number(rerun[1]));
+        assert.ok(workflow, "cannot rerun an unknown workflow");
+        workflow.status = "queued";
+        workflow.conclusion = null;
+        workflow.run_attempt++;
+        return new Response(null, { status: 201 });
+      }
       return Response.json({});
     }
     const replies = {
@@ -847,12 +872,16 @@ function mockImprovementPr() {
       "/repos/owner/repo/pulls/8": state.pr,
       "/repos/owner/repo": { default_branch: "main" },
       "/repos/owner/repo/issues/8/comments?per_page=100": state.prComments,
-      "/repos/owner/repo/pulls/8/files?per_page=100": [{ filename: "src/a.js" }],
+      "/repos/owner/repo/pulls/8/files?per_page=100": state.files,
       [`/repos/owner/repo/compare/main...${state.pr.head.sha}`]: { behind_by: state.behindBy },
       [`/repos/owner/repo/commits/${state.pr.head.sha}/check-runs?per_page=100`]: state.checks,
       [`/repos/owner/repo/commits/${state.pr.head.sha}/status`]: state.status,
       "/repos/owner/repo/pulls/8/reviews?per_page=100": state.reviews,
+      [`/repos/owner/repo/actions/runs?event=pull_request&head_sha=${state.pr.head.sha}&per_page=100`]: {
+        total_count: state.workflowRuns.length, workflow_runs: state.workflowRuns,
+      },
     };
+    for (const workflow of state.workflowRuns) replies[`/repos/owner/repo/actions/runs/${workflow.id}`] = workflow;
     assert.ok(path in replies, `unexpected request: ${path}`);
     return Response.json(replies[path]);
   };
@@ -863,6 +892,263 @@ function mockImprovementPr() {
   });
   return { state, run, restore: () => { globalThis.fetch = previousFetch; } };
 }
+
+function cancelledValidation(state) {
+  state.pr.draft = false;
+  state.checks = { total_count: 1, check_runs: [{
+    name: "build", status: "completed", conclusion: "cancelled",
+    app: { slug: "github-actions" }, check_suite: { id: 55 },
+  }] };
+  state.workflowRuns = [{
+    id: 10, workflow_id: 100, check_suite_id: 55, event: "pull_request",
+    head_sha: "abcd", pull_requests: [{ number: 8 }], created_at: "2026-10-02T10:25:00Z",
+    status: "completed", conclusion: "cancelled", run_attempt: 2,
+    triggering_actor: { login: "app[bot]" },
+  }];
+}
+
+test("each cancelled workflow is retried once despite having multiple cancelled jobs", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    cancelledValidation(state);
+    state.checks.check_runs.push({ ...state.checks.check_runs[0], name: "integration" });
+    state.workflowRuns.push({ ...state.workflowRuns[0], id: 11, workflow_id: 200, check_suite_id: 56 });
+    state.checks.check_runs.push({ ...state.checks.check_runs[0], name: "quality", check_suite: { id: 56 } });
+    await run();
+    assert.deepEqual(state.writes.filter((write) => write.path.endsWith("/rerun")).map((write) => write.path), [
+      "/repos/owner/repo/actions/runs/10/rerun", "/repos/owner/repo/actions/runs/11/rerun",
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test("cancelled validation cannot bypass risk review or retry runs released by another identity", async () => {
+  for (const untrusted of ["initial", "foreign"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      cancelledValidation(state);
+      if (untrusted === "initial") state.workflowRuns[0].run_attempt = 1;
+      else state.workflowRuns[0].triggering_actor.login = "other-bot[bot]";
+      await run();
+      assert.equal(state.writes.length, 1);
+      assert.match(state.writes[0].body.body, /not previously released by the trusted App/);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test("human PRs, forks and sensitive changes cannot enter workflow recovery", async () => {
+  for (const untrusted of ["human", "fork", "sensitive"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      cancelledValidation(state);
+      if (untrusted === "human") state.pr.user.login = "owner";
+      if (untrusted === "fork") state.pr.head.repo.full_name = "contributor/repo";
+      if (untrusted === "sensitive") state.files[0].filename = ".github/workflows/test.yml";
+      await run();
+      assert.equal(state.writes.some((write) => write.path.endsWith("/rerun")), false);
+      assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test("obsolete cancellations wait for newer pending approval and never rerun the old event", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    cancelledValidation(state);
+    state.workflowRuns.push({
+      ...state.workflowRuns[0], id: 11, check_suite_id: 56,
+      conclusion: "action_required", created_at: "2026-10-02T11:00:00Z",
+    });
+    await run();
+    assert.equal(state.writes.length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("obsolete cancelled contexts do not block successful newer validation but cannot fake passing checks", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    cancelledValidation(state);
+    state.workflowRuns.push({
+      ...state.workflowRuns[0], id: 11, check_suite_id: 56,
+      conclusion: "success", created_at: "2026-10-02T11:00:00Z",
+    });
+    await run();
+    assert.equal(state.writes.length, 0, "no real passing check is present yet");
+    state.checks.check_runs.push({ name: "validation", status: "completed", conclusion: "success" });
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    state.pr.mergeable_state = "clean";
+    await run();
+    assert.equal(state.writes.length, 1);
+    assert.match(state.writes[0].body.body, /ready for \*\*human\*\* review and merge/);
+  } finally {
+    restore();
+  }
+});
+
+test("cancelled validation reruns the latest event using the App, never an obsolete draft or Copilot mention", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    cancelledValidation(state);
+    state.workflowRuns.push({
+      ...state.workflowRuns[0], id: 9, check_suite_id: 54,
+      created_at: "2026-10-02T08:56:00Z", conclusion: "action_required",
+    });
+    await run("true");
+    assert.equal(state.writes.length, 0);
+    await run();
+    assert.deepEqual(state.writes.map((write) => `${write.method} ${write.path}`), [
+      "POST /repos/owner/repo/issues/7/comments",
+      "POST /repos/owner/repo/actions/runs/10/rerun",
+    ]);
+    assert.match(state.writes[0].body.body, /platform-devex-ci-rerun:10:abcd:2/);
+    assert.equal(state.writes[1].token, "Bearer app");
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+    await run();
+    assert.equal(state.writes.length, 2, "a queued retry must not be retried again");
+    state.checks.check_runs[0].conclusion = "success";
+    state.workflowRuns[0].status = "completed";
+    state.workflowRuns[0].conclusion = "success";
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    state.pr.mergeable_state = "clean";
+    await run();
+    assert.match(state.writes.at(-1).body.body, /ready for \*\*human\*\* review and merge/);
+  } finally {
+    restore();
+  }
+});
+
+test("cancelled workflows have two automatic retries then escalate without a code-change request", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    cancelledValidation(state);
+    await run();
+    state.workflowRuns[0].status = "completed";
+    state.workflowRuns[0].conclusion = "cancelled";
+    await run();
+    state.workflowRuns[0].status = "completed";
+    state.workflowRuns[0].conclusion = "cancelled";
+    await run();
+    assert.equal(state.writes.filter((write) => write.path.endsWith("/rerun")).length, 2);
+    assert.match(state.writes.at(-1).body.body, /bounded retry budget/);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+  } finally {
+    restore();
+  }
+});
+
+test("foreign retry markers cannot exhaust the workflow recovery budget", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    cancelledValidation(state);
+    state.issueComments.push(...[1, 2].map((attempt) => ({
+      user: { login: "other-bot[bot]" }, body: `<!-- platform-devex-ci-rerun:10:abcd:${attempt} -->`,
+    })));
+    await run();
+    assert.equal(state.writes.filter((write) => write.path.endsWith("/rerun")).length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test("newer workflow events and PR changes during recovery prevent stale retries", async () => {
+  for (const change of ["head", "workflow", "attempt"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      cancelledValidation(state);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path === "/repos/owner/repo/actions/runs/10") {
+          if (change === "head") state.pr.head.sha = "new-head";
+          if (change === "workflow") state.workflowRuns.push({
+            ...state.workflowRuns[0], id: 11, created_at: "2026-10-02T11:00:00Z",
+          });
+          if (change === "attempt") state.workflowRuns[0].run_attempt++;
+        }
+        if (path === "/repos/owner/repo/actions/runs" && change === "head") {
+          return Response.json({ total_count: 1, workflow_runs: state.workflowRuns });
+        }
+        return originalFetch(url, init);
+      };
+      await run();
+      assert.equal(state.writes.length, 0, `must not retry after ${change} changes`);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test("workflow recovery reads every canonical API page and rejects foreign pagination", async () => {
+  for (const foreign of [false, true]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      cancelledValidation(state);
+      const latest = state.workflowRuns[0];
+      const older = { ...latest, id: 9, check_suite_id: 54, created_at: "2026-10-02T08:56:00Z" };
+      const originalFetch = globalThis.fetch;
+      let pages = 0;
+      globalThis.fetch = async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path === "/repos/owner/repo/actions/runs") {
+          pages++;
+          return Response.json({ total_count: 2, workflow_runs: [older] }, { headers: {
+            link: `<${foreign ? "https://foreign.example" : "https://api.github.com"}/repositories/99/actions/runs?page=2>; rel="next"`,
+          } });
+        }
+        if (path === "/repositories/99/actions/runs") {
+          pages++;
+          return Response.json({ total_count: 2, workflow_runs: [latest] });
+        }
+        return originalFetch(url, init);
+      };
+      if (foreign) {
+        await assert.rejects(run(), /Unexpected GitHub pagination URL/);
+        assert.equal(state.writes.length, 0);
+      } else {
+        await run();
+        assert.equal(pages, 4);
+        assert.equal(state.writes.filter((write) => write.path.endsWith("/rerun")).length, 1);
+      }
+    } finally {
+      restore();
+    }
+  }
+});
+
+test("incomplete workflow history and retry API failures are explicit, never safe fallbacks", async () => {
+  for (const failure of ["paging", "rerun"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      cancelledValidation(state);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path === "/repos/owner/repo/actions/runs" && failure === "paging") {
+          return Response.json({ total_count: 2, workflow_runs: state.workflowRuns });
+        }
+        if (path.endsWith("/rerun") && failure === "rerun") return new Response("", { status: 403 });
+        return originalFetch(url, init);
+      };
+      await assert.rejects(run(), failure === "paging" ? /Incomplete/ : /HTTP 403/);
+      assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+      if (failure === "rerun") {
+        await run();
+        assert.match(state.writes.at(-1).body.body, /bounded retry budget/);
+      }
+    } finally {
+      restore();
+    }
+  }
+});
 
 test("trusted draft becomes ready, skipped-only checks cannot pass, and handoff waits for green checks and review", async () => {
   const { state, run, restore } = mockImprovementPr();

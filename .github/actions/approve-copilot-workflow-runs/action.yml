@@ -1,5 +1,5 @@
 name: "approve-copilot-workflow-runs"
-description: "Reviews Actions workflow runs awaiting approval that were triggered by Copilot coding agent commits (or other configured trusted automation), and approves the ones that pass a deterministic CI-file allowlist plus an automated Copilot CLI risk review"
+description: "Reviews only the latest current-head, non-draft PR workflow runs awaiting approval, releasing trusted automation after a deterministic CI-file denylist and Copilot CLI risk review"
 
 inputs:
   github-token:
@@ -112,6 +112,11 @@ runs:
         # decision comment, instead of once per run.
         declare -A VERDICT_CACHE
         declare -A REASON_CACHE
+        latest_run_ids() {
+          local history
+          history=$(gh api "repos/${REPOSITORY}/actions/workflows/${WORKFLOW_ID}/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=100" --paginate --jq '.') || return 1
+          printf '%s\n' "$history" | jq -s '.' | node "${GITHUB_ACTION_PATH}/workflow-runs.mjs" "$PR_NUM" "$HEAD_SHA"
+        }
         if [[ -n "$RUN_IDS_RAW" ]]; then
           while IFS= read -r RUN_ID; do
             [[ -z "$RUN_ID" ]] && continue
@@ -120,6 +125,7 @@ runs:
             PR_NUM=$(echo "$RUN_JSON" | jq -r '.pull_requests[0].number // empty')
             HEAD_SHA=$(echo "$RUN_JSON" | jq -r '.head_sha')
             ACTOR_LOGIN=$(echo "$RUN_JSON" | jq -r '.actor.login')
+            WORKFLOW_ID=$(echo "$RUN_JSON" | jq -r '.workflow_id')
             # Use the base sha the run itself was triggered against
             # (recorded on the run's pull_requests entry at event time),
             # not a fresh `pulls/{n}` lookup - the PR's current base can
@@ -134,11 +140,25 @@ runs:
               continue
             fi
 
+            PR_JSON=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}")
+            if ! echo "$PR_JSON" | jq -e --arg repo "$REPOSITORY" --arg head "$HEAD_SHA" '
+              .state == "open" and .draft == false
+              and .head.repo.full_name == $repo and .base.repo.full_name == $repo
+              and .head.sha == $head
+            ' >/dev/null; then
+              echo "Run ${RUN_ID} (PR #${PR_NUM}): draft, closed, forked or superseded head; skipping release"
+              continue
+            fi
+            LATEST_IDS=$(latest_run_ids)
+            if ! grep -qx "$RUN_ID" <<< "$LATEST_IDS"; then
+              echo "Run ${RUN_ID} (PR #${PR_NUM}): superseded by a newer workflow event for this head; skipping release"
+              continue
+            fi
+
             # Human-triggered runs require the current Copilot PR and its
             # owner-authored batch issue. Other broad actors still require
             # their paired PR author before any diff review or release.
             if [[ -n "$IMPROVEMENT_ACTOR" && "$ACTOR_LOGIN" == "$IMPROVEMENT_ACTOR" ]]; then
-              PR_JSON=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}")
               if ! echo "$PR_JSON" | jq -e --arg repo "$REPOSITORY" --arg head "$HEAD_SHA" '
                 (.user.login == "Copilot" or .user.login == "copilot-swe-agent[bot]")
                 and .state == "open" and .draft == false
@@ -392,6 +412,17 @@ runs:
             fi
 
             if [[ "$VERDICT" == "approve" ]]; then
+              CURRENT_RUN=$(gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}")
+              LATEST_IDS=$(latest_run_ids)
+              CURRENT_PR=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}")
+              if ! echo "$CURRENT_PR" | jq -e --arg repo "$REPOSITORY" --arg head "$HEAD_SHA" '
+                .state == "open" and .draft == false and .head.sha == $head
+                and .head.repo.full_name == $repo and .base.repo.full_name == $repo
+              ' >/dev/null || ! grep -qx "$RUN_ID" <<< "$LATEST_IDS" ||
+                 ! echo "$CURRENT_RUN" | jq -e '.conclusion == "action_required" or .status == "action_required"' >/dev/null; then
+                echo "Run ${RUN_ID} (PR #${PR_NUM}): PR or latest workflow state changed during review; skipping release"
+                continue
+              fi
               if [[ "$DRY_RUN" == "true" ]]; then
                 echo "Dry-run: would release run ${RUN_ID} (PR #${PR_NUM}): ${REASON}"
               else
