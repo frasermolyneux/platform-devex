@@ -250,7 +250,7 @@ runs:
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Dry-run: would delegate PR #${NUM} (${FAILED_COUNT} failing check(s) at ${SHA})"
             else
-              BODY=$(printf '%s<!-- sha:%s -->\n@copilot investigate and resolve the failed checks on this pull request.' "$MARKER" "$SHA")
+              BODY=$(printf '%s<!-- sha:%s -->\n@copilot investigate and resolve the failed checks on this pull request. Keep the fix narrowly scoped and preserve behavior. Follow any linked issue test acceptance criteria; add or extend relevant regression tests when changing code, run applicable unit/integration/Playwright suites using existing tooling, and report commands, results and reasons for unchanged or inapplicable coverage in the PR description. If adequate testing is blocked, explain and stop for human guidance.' "$MARKER" "$SHA")
               GH_TOKEN="$COMMENT_TOKEN" gh api "repos/${REPOSITORY}/issues/${NUM}/comments" -f body="$BODY" --silent
               echo "Delegated PR #${NUM} (${FAILED_COUNT} failing check(s) at ${SHA})"
             fi

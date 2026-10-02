@@ -64,8 +64,18 @@ human. A proposed PR may touch at most eight files and 250 changed lines; gated 
 always escalated. Stale alerts whose source files no longer exist on the default branch are
 skipped with a warning; SonarCloud paths relative to a scanned `src` directory are resolved
 against GitHub before sampling. Eligible issues are assigned to Copilot, with a requirement to preserve
-observable functionality, architecture, performance and cost and run the target repository's
-relevant unit, integration and Playwright tests. Batch issues
+observable functionality, architecture, performance and cost. The SDK intake, issue acceptance
+criteria, Copilot assignment and repair/review follow-ups explicitly require adding or extending
+focused unit/regression tests for changed logic, integration tests for affected boundaries, and
+Playwright tests for affected user-facing journeys where the repository uses it. Backend-only
+changes do not require browser tests. Existing coverage may be reused only with the exact
+covering tests and a rationale; the PR must identify test changes, applicable layers, commands
+and results. Use existing test tooling, without unrelated setup or architecture changes.
+Test files may live outside the production directory, but still count toward the eight-file,
+250-line limit; inadequate coverage must not be dropped to fit that limit. Testing blockers
+require human guidance. Green checks are not automatic proof of adequate regression coverage:
+the final human review still assesses the tests and any justification for unchanged coverage.
+Batch issues
 carry a `platform-devex-ci` label so reconciliation does not page through unrelated issue history.
 Each issue records open-finding counts by scanner at intake. After human merge, the controller
 waits for the selected findings to disappear on the default branch and, for SonarCloud

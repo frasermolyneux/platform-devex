@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { classifyAutomation } from "../.github/actions/delegate-failed-checks/eligibility.mjs";
+
+test("the maintenance delegation comment preserves scope and requires relevant test coverage evidence", async () => {
+  const source = await readFile(new URL("../.github/actions/delegate-failed-checks/action.yml", import.meta.url), "utf8");
+  const body = source.match(/^\s+BODY=\$\(printf '([^']+)' "\$MARKER" "\$SHA"\)$/m)?.[1];
+  assert.ok(body, "delegation comment template must exist");
+  assert.match(body, /Keep the fix narrowly scoped and preserve behavior/);
+  assert.match(body, /Follow any linked issue test acceptance criteria/);
+  assert.match(body, /add or extend relevant regression tests when changing code/);
+  assert.match(body, /applicable unit\/integration\/Playwright suites using existing tooling/);
+  assert.match(body, /report commands, results and reasons for unchanged or inapplicable coverage/);
+  assert.match(body, /stop for human guidance/);
+});
 
 function pullRequest(author, branch) {
   return {

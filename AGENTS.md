@@ -115,6 +115,15 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   Diversify sampled rules and record before/after counts; wait for a post-merge Sonar analysis
   before resolving SonarCloud findings. Keep `SONAR_TOKEN` out of the SDK environment. Missing
   scanners, absent review, incomplete checks and third-party PRs are never safe; never auto-merge.
+- Keep the shared continuous-improvement test requirements consistent in SDK intake, generated
+  issue acceptance criteria, agent assignment and repair/review comments. Require focused
+  added/extended unit/regression tests, integration tests for affected boundaries and Playwright
+  tests for affected UI journeys when already used; backend-only changes do not need browser
+  tests. If existing coverage suffices, name the exact tests and explain why no additions are
+  needed. PR descriptions must identify test changes, applicable layers, commands and results.
+  Reuse existing tooling; never introduce unrelated test setup or omit coverage to meet scope
+  limits. Test files may be in separate directories but count toward eight files/250 changed
+  lines. Testing blockers require human guidance, and human review assesses coverage adequacy.
 - New batch issues carry the `platform-devex-ci` label in addition to their body marker; query
   this label when locating open/closed batches so unrelated issues in the same repository do not
   exhaust pagination. Do not remove the label from an in-progress issue.

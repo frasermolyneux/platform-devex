@@ -9,6 +9,7 @@ import {
   checkState,
   diffRisk,
   ensureBatchLabel,
+  improvementTask,
   main,
   parseAllowlist,
   parseBatch,
@@ -17,6 +18,39 @@ import {
   selectRepositories,
   validateProposal,
 } from "./continuous-improvement.mjs";
+
+function assertTestingInstructions(text) {
+  assert.match(text, /Add or extend focused unit\/regression tests/);
+  assert.match(text, /integration tests when affected behavior crosses/);
+  assert.match(text, /Playwright tests for affected user-facing journeys when the repository uses Playwright/);
+  assert.match(text, /backend-only changes do not require browser tests/);
+  assert.match(text, /Use existing test frameworks and patterns/);
+  assert.match(text, /identify the exact tests and explain why additions are unnecessary/);
+  assert.match(text, /PR description, record added\/updated test paths, commands, pass\/fail outcomes/);
+  assert.match(text, /stop for human guidance; never omit required coverage to meet the size limit/);
+  assert.match(text, /targeted tests may live in separate test directories/);
+  assert.match(text, /entire PR, including tests, within eight files and 250 added\/deleted lines/);
+}
+
+test("improvement issues and agent assignments require appropriate new coverage within the same bounded scope", () => {
+  const proposal = {
+    title: "Simplify reminders", rationale: "Preserve recipient selection and failure isolation",
+    alertIds: ["sonarcloud:One"], tests: ["dotnet test --filter ReminderTests"],
+    alerts: [{ id: "sonarcloud:One", severity: "medium", summary: "Simplify", url: "https://sonarcloud.io/example" }],
+  };
+  const counts = { "code-scanning": 2, sonarcloud: 4 };
+  const task = improvementTask("owner/repo", "main", proposal, counts);
+  assert.equal(task.title, "Continuous improvement: Simplify reminders");
+  assert.deepEqual(parseBatch(task.body), { alertIds: proposal.alertIds, baseline: counts });
+  assert.deepEqual(task.labels, ["platform-devex-ci"]);
+  assert.deepEqual(task.assignees, ["copilot-swe-agent[bot]"]);
+  assert.equal(task.agent_assignment.target_repo, "owner/repo");
+  assert.equal(task.agent_assignment.base_branch, "main");
+  assertTestingInstructions(task.body);
+  assertTestingInstructions(task.agent_assignment.custom_instructions);
+  assert.match(task.body, /Suggested verification: dotnet test --filter ReminderTests/);
+  assert.match(task.body, /Human review and merge are required/);
+});
 
 test("allowlist is explicit, deduplicated and rejects unsafe names", () => {
   assert.deepEqual(parseAllowlist(" first, second,first "), ["first", "second"]);
@@ -113,6 +147,10 @@ test("diff gate blocks sensitive paths and oversized changes", () => {
   assert.equal(diffRisk({ ...pr, additions: 249, deletions: 1 }, [{ filename: "src/a.js" }]), null);
   assert.match(diffRisk({ ...pr, additions: 251 }, [{ filename: "src/a.js" }]), /250-line/);
   assert.match(diffRisk({ ...pr, changed_files: 9 }, [{ filename: "src/a.js" }]), /eight-file/);
+  const files = ["src/a.js", "tests/unit/a.test.js", "tests/integration/a.test.js", "tests/playwright/a.spec.js"]
+    .map((filename) => ({ filename }));
+  assert.equal(diffRisk({ changed_files: 4, additions: 200, deletions: 20 }, files), null);
+  assert.match(diffRisk({ changed_files: 4, additions: 230, deletions: 21 }, files), /250-line/);
 });
 
 test("candidate sampling spans scanners and rules instead of the first noisy findings", () => {
@@ -295,6 +333,7 @@ test("SDK impact analysis has no tools and validates its response", async () => 
             sendAndWait: async (message) => {
               assert.equal(message.responseSchema, undefined);
               assert.match(message.prompt, /alertIds \(array of IDs\)/);
+              assertTestingInstructions(message.prompt);
               return { data: { content: '{"decision":"skip"}' } };
             },
           };
@@ -784,6 +823,7 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
     assert.equal(writes.length, 1);
     assert.equal(writes[0].path, "/repos/owner/repo/issues/8/comments");
     assert.match(writes[0].body, /<!-- devex-copilot-delegate --><!-- sha:abcd -->/);
+    assertTestingInstructions(writes[0].body);
     prComments.push({ user: { login: "owner" }, body: writes[0].body });
     await main(env);
     assert.equal(writes.length, 1);
@@ -1286,6 +1326,7 @@ test("unresolved Copilot review threads delegate instead of handing off", async 
     assert.equal(state.writes[0].path, "/repos/owner/repo/issues/8/comments");
     assert.equal(state.writes[0].token, "Bearer human");
     assert.match(state.writes[0].body.body, /@copilot please address/);
+    assertTestingInstructions(state.writes[0].body.body);
   } finally {
     restore();
   }
