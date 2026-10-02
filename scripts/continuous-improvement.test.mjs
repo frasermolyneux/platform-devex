@@ -853,6 +853,10 @@ function mockImprovementPr() {
     status: { state: "pending", statuses: [] },
     behindBy: 0,
     reviews: [],
+    reviewRequestEvents: [],
+    recordReviewRequest: true,
+    reviewRequester: "owner",
+    requestedReviewer: "copilot-pull-request-reviewer",
     threads: [],
     issueComments: [],
     prComments: [],
@@ -866,11 +870,21 @@ function mockImprovementPr() {
     if (init.method !== "GET") {
       const body = init.body ? JSON.parse(init.body) : null;
       if (path === "/graphql" && body.query.startsWith("query(")) {
+        if (body.query.includes("timelineItems")) {
+          return Response.json({ data: { repository: { pullRequest: {
+            timelineItems: { nodes: state.reviewRequestEvents },
+          } } } });
+        }
         return Response.json({ data: { repository: { pullRequest: { reviewThreads: {
           nodes: state.threads, pageInfo: { hasNextPage: false },
         } } } } });
       }
       state.writes.push({ method: init.method, path, body, token: init.headers.Authorization });
+      if (path === "/repos/owner/repo/pulls/8/requested_reviewers" && state.recordReviewRequest &&
+          init.headers.Authorization.split(" ").at(-1) === "human") {
+        state.reviewRequestEvents.push({ id: `REVIEW_REQUEST_${state.writes.length}`,
+          actor: { login: state.reviewRequester }, requestedReviewer: { login: state.requestedReviewer } });
+      }
       if (path === "/graphql") {
         if (body.query.includes("markPullRequestReadyForReview")) {
           state.pr.draft = false;
@@ -1208,8 +1222,10 @@ test("trusted draft becomes ready, skipped-only checks cannot pass, and handoff 
     ] };
     await run();
     assert.equal(state.writes[1].path, "/repos/owner/repo/pulls/8/requested_reviewers");
+    assert.equal(state.writes[1].token.split(" ").at(-1), "human");
     assert.deepEqual(state.writes[1].body.reviewers, ["copilot-pull-request-reviewer[bot]"]);
     assert.equal(state.writes[2].path, "/repos/owner/repo/issues/7/comments");
+    assert.match(state.writes[2].body.body, /platform-devex-ci-human-review:abcd/);
     state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
       commit_id: "abcd", state: "COMMENTED" });
     await run();
@@ -1224,6 +1240,93 @@ test("trusted draft becomes ready, skipped-only checks cannot pass, and handoff 
     assert.equal(state.writes.length, 4);
   } finally {
     restore();
+  }
+});
+
+test("verified human reviews ignore legacy App markers and deduplicate only the same head", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.pr.draft = false;
+    state.checks.check_runs[0].conclusion = "success";
+    state.issueComments.push({ user: { login: "app[bot]" },
+      body: "<!-- platform-devex-ci-review:abcd -->" });
+    await run("true");
+    assert.equal(state.writes.length, 0);
+    await run();
+    assert.equal(state.writes.length, 2);
+    assert.equal(state.reviewRequestEvents.length, 1);
+    await run();
+    assert.equal(state.writes.length, 2);
+    state.pr.head.sha = "new";
+    await run();
+    assert.equal(state.writes.length, 4);
+    assert.match(state.writes[3].body.body, /platform-devex-ci-human-review:new/);
+  } finally {
+    restore();
+  }
+});
+
+test("a successful but ignored review request is never recorded, including with an older matching event", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.pr.draft = false;
+    state.checks.check_runs[0].conclusion = "success";
+    state.recordReviewRequest = false;
+    state.reviewRequestEvents.push({ id: "OLD_REQUEST", actor: { login: "owner" },
+      requestedReviewer: { login: "copilot-pull-request-reviewer" } });
+    await assert.rejects(run(), /did not record a new human-authored Copilot review request/);
+    assert.equal(state.writes.length, 1);
+    assert.equal(state.writes[0].path, "/repos/owner/repo/pulls/8/requested_reviewers");
+    assert.equal(state.issueComments.length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("unrelated actors and reviewers cannot confirm a Copilot review request", async () => {
+  for (const mismatch of ["reviewRequester", "requestedReviewer"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      state.pr.draft = false;
+      state.checks.check_runs[0].conclusion = "success";
+      state[mismatch] = "other";
+      await assert.rejects(run(), /did not record a new human-authored Copilot review request/);
+      assert.equal(state.writes.length, 1);
+      assert.equal(state.issueComments.length, 0);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test("review-request verification errors and API failures cannot write success markers", async () => {
+  for (const failure of ["graphql", "malformed", "request", "verification"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      state.pr.draft = false;
+      state.checks.check_runs[0].conclusion = "success";
+      const originalFetch = globalThis.fetch;
+      let eventReads = 0;
+      globalThis.fetch = async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith("/requested_reviewers") && failure === "request") {
+          return new Response(null, { status: 403 });
+        }
+        if (path === "/graphql" && JSON.parse(init.body).query.includes("timelineItems")) {
+          eventReads++;
+          if (failure === "graphql" || (failure === "verification" && eventReads === 2)) {
+            return Response.json({ errors: [{ message: "Cannot read events" }] });
+          }
+          if (failure === "malformed") return Response.json({ data: { repository: null } });
+        }
+        return originalFetch(url, init);
+      };
+      await assert.rejects(run(), failure === "request" ? /HTTP 403/ : /cannot verify Copilot review request events/);
+      assert.equal(state.issueComments.length, 0);
+      assert.equal(state.writes.some((write) => write.path.endsWith("/comments")), false);
+    } finally {
+      restore();
+    }
   }
 });
 

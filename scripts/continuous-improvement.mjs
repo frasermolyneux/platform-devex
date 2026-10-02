@@ -7,7 +7,7 @@ import { collectWorkflowRuns, latestPullRequestRuns } from "../.github/actions/a
 const BATCH_MARKER = "platform-devex-ci-batch-v1";
 const BATCH_LABEL = "platform-devex-ci";
 const ESCALATION_MARKER = "<!-- platform-devex-ci-escalated -->";
-const REVIEW_MARKER = "<!-- platform-devex-ci-review:";
+const REVIEW_MARKER = "<!-- platform-devex-ci-human-review:";
 const FIX_MARKER = "<!-- platform-devex-ci-fix:";
 const READY_MARKER = "<!-- platform-devex-ci-ready:";
 const VERIFIED_MARKER = "<!-- platform-devex-ci-verified -->";
@@ -542,6 +542,35 @@ async function reviewThreads(api, repo, number) {
   return threads.nodes;
 }
 
+async function reviewRequestEvents(api, repo, number) {
+  const [owner, name] = repo.split("/");
+  const response = await api.request("/graphql", {
+    method: "POST",
+    body: {
+      query: "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(last:20,itemTypes:[REVIEW_REQUESTED_EVENT]){nodes{... on ReviewRequestedEvent{id actor{login} requestedReviewer{... on Bot{login}}}}}}}}",
+      variables: { owner, name, number },
+    },
+  });
+  const events = response.data?.repository?.pullRequest?.timelineItems?.nodes;
+  if (response.errors?.length || !Array.isArray(events) ||
+      events.some((event) => typeof event?.id !== "string" || !event.id)) {
+    throw new Error(`${repo}#${number}: cannot verify Copilot review request events: ${JSON.stringify(response.errors ?? response)}`);
+  }
+  return events;
+}
+
+async function requestCopilotReview(app, human, repo, number) {
+  const previousIds = new Set((await reviewRequestEvents(app, repo, number)).map((event) => event.id));
+  await human.request(`/repos/${repo}/pulls/${number}/requested_reviewers`, {
+    method: "POST", body: { reviewers: [COPILOT_REVIEWER] },
+  });
+  const events = await reviewRequestEvents(app, repo, number);
+  if (!events.some((event) => !previousIds.has(event.id) && event.actor?.login === human.login &&
+      event.requestedReviewer?.login === COPILOT_REVIEW_CHECK)) {
+    throw new Error(`${repo}#${number}: GitHub did not record a new human-authored Copilot review request; no request marker written`);
+  }
+}
+
 async function delegateCheckFailure(human, app, repo, issue, pr, sha, prComments, dryRun, appLogin) {
   const attempts = prComments.filter((comment) =>
     comment.user?.login === human.login && comment.body?.includes(DELEGATE_MARKER));
@@ -757,9 +786,7 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     if (!existing.some((comment) => comment.user?.login === appLogin && comment.body?.includes(marker))) {
       await note(`${repo}#${issue.number}: requesting Copilot review of PR #${pr.number} at ${sha}.`);
       if (!dryRun) {
-        await app.request(`/repos/${repo}/pulls/${pr.number}/requested_reviewers`, {
-          method: "POST", body: { reviewers: [COPILOT_REVIEWER] },
-        });
+        await requestCopilotReview(app, human, repo, pr.number);
         await app.request(`/repos/${repo}/issues/${issue.number}/comments`, {
           method: "POST", body: { body: `${marker}\nRequested Copilot review for PR #${pr.number} at ${sha}.` },
         });

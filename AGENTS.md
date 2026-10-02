@@ -141,8 +141,11 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   PR SHA, branch freshness and GitHub merge requirements before handing off for human review.
   Draft PR check failures and non-draft failures outside the sweep's check-run criteria get up
   to three same-SHA deduplicated human-PAT mentions; the separate failed-check action handles
-  non-draft check-run failures. Copilot reviews are requested after passing validation;
-  unresolved Copilot review threads must be addressed before handoff. Auto-closing issue
+  non-draft check-run failures. Request Copilot reviews after passing validation using the
+  entitled human PAT, not the App token (which can silently ignore a successful request).
+  Verify a new human-authored Copilot review-request timeline event before writing the per-head
+  marker; legacy App-request markers must not suppress a verified request. Unresolved Copilot
+  review threads must be addressed before handoff. Auto-closing issue
   references in the PR description are replaced with `Refs #...` to retain the batch issue
   for post-merge verification, then only the corresponding review thread is resolved
   using the human PAT (GitHub rejects the App token for this mutation).

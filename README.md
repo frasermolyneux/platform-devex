@@ -96,7 +96,7 @@ requirements still apply. Unmappable cancellations, uncertain retry outcomes and
 budgets escalate to a human. It handles failed checks on drafts and non-draft
 failures outside the sweep's check-run criteria (at most three attempts); the separate
 failed-check workflow handles non-draft check-run failures. After real validation passes, it
-requests a review of the latest commit from Copilot, delegates inline findings at most twice,
+requests a review of the latest commit from Copilot using the entitled human PAT, delegates inline findings at most twice,
 and escalates stalled, oversized, CI-changing or unresolved work. If Copilot used an
 auto-closing reference to the batch issue, the controller changes it to `Refs #...` so the
 issue stays open through post-merge verification; it resolves Copilot's corresponding
@@ -109,6 +109,11 @@ separate CI-file denylist and restricted Copilot CLI risk review. **A human revi
 the controller verifies the target alerts are gone before closing
 the issue. An incomplete run is reported on this repository's "Continuous improvement activity
 log" issue; unavailable scanners are never treated as clean results.
+
+Copilot review requests can return success without queuing a review when sent by the App.
+The controller verifies a new human-authored Copilot review-request event before recording
+its per-head deduplication marker. Unverified requests fail explicitly and remain retryable;
+legacy App-request markers do not block a verified human request.
 
 Before opting in a repository:
 
@@ -170,9 +175,9 @@ same human account, to produce its risk-review verdict. Since the maintenance wo
 run on the shared GitHub App's installation tokens, one fine-grained personal access token
 (`secrets.COPILOT_AGENT_PAT`) is used for the delegation comment, the CLI risk-review call,
 the improvement controller's Copilot issue assignment, PR follow-up comments,
-ready-for-review transition, branch updates and review-thread resolution, and the
+ready-for-review transition, branch updates, Copilot review requests and review-thread resolution, and the
 restricted SDK analysis session. The improvement controller uses its scoped App token
-for target reads, review requests and bounded cancelled-validation reruns;
+for target reads, verified-request audit comments and bounded cancelled-validation reruns;
 discovery, `stale-branch-sweep`, the maintenance actions' read-only lookups, the pending-run
 release call and audit comment, and the delegation fallback comment use the App token.
 
