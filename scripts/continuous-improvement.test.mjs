@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  addContext,
   analyze,
   checkState,
   diffRisk,
@@ -223,6 +224,30 @@ test("unknown, unauthorized and truncated SonarCloud scans cannot be treated as 
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+test("SonarCloud paths relative to src resolve to real GitHub files and share lookups", async () => {
+  const paths = [];
+  const api = { request: async (path) => {
+    paths.push(path);
+    if (path === "/repos/owner/repo") return { default_branch: "main" };
+    if (path === "/repos/owner/repo/contents/src/Project/File.cs?ref=main") {
+      return { type: "file", size: 32, encoding: "base64",
+        content: Buffer.from("public class File {}").toString("base64") };
+    }
+    throw new Error(`GitHub GET ${path} returned HTTP 404`);
+  } };
+  const alerts = ["First", "Second"].map((id) => ({
+    id: `sonarcloud:${id}`, source: "sonarcloud", path: "Project/File.cs", line: 1,
+  }));
+  const contextual = await addContext(api, "owner/repo", alerts);
+  assert.equal(contextual.length, 2);
+  assert.deepEqual(contextual.map((alert) => alert.path), ["src/Project/File.cs", "src/Project/File.cs"]);
+  assert.match(contextual[0].context, /public class File/);
+  assert.deepEqual(paths, [
+    "/repos/owner/repo", "/repos/owner/repo/contents/Project/File.cs?ref=main",
+    "/repos/owner/repo/contents/src/Project/File.cs?ref=main",
+  ]);
 });
 
 test("SDK impact analysis has no tools and validates its response", async () => {

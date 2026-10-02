@@ -343,19 +343,34 @@ export async function scanAlerts(api, repo, enabledSources, sonarToken) {
   return { alerts, counts, sonarAnalysisDate, sonarIsCurrent, complete: unavailable === 0 && invalid === 0 };
 }
 
-async function addContext(api, repo, alerts) {
+export async function addContext(api, repo, alerts) {
   const branch = (await api.request(`/repos/${repo}`)).default_branch;
   const result = [];
+  const files = new Map();
+  async function sourceFile(path) {
+    if (files.has(path)) return files.get(path);
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
+    try {
+      const file = await api.request(`/repos/${repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`);
+      files.set(path, file);
+      return file;
+    } catch (error) {
+      if (!error.message.endsWith("HTTP 404")) throw error;
+      files.set(path, null);
+      return null;
+    }
+  }
   for (const alert of alerts) {
     if (alert.path.split("/").some((part) => part === "." || part === "..")) {
       throw new Error(`Unexpected alert path: ${alert.path}`);
     }
-    const path = alert.path.split("/").map(encodeURIComponent).join("/");
-    let file;
-    try {
-      file = await api.request(`/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`);
-    } catch (error) {
-      if (!error.message.endsWith("HTTP 404")) throw error;
+    let path = alert.path;
+    let file = await sourceFile(path);
+    if (!file && alert.source === "sonarcloud" && !path.startsWith("src/")) {
+      path = `src/${path}`;
+      file = await sourceFile(path);
+    }
+    if (!file) {
       console.warn(`::warning::Skipping ${alert.id}: ${alert.path} is absent from ${branch}`);
       continue;
     }
@@ -367,8 +382,10 @@ async function addContext(api, repo, alerts) {
     const start = alert.line ? Math.max(0, alert.line - 16) : 0;
     result.push({
       ...alert,
+      path,
       context: lines.slice(start, start + 32).map((line) => line.slice(0, 300)).join("\n"),
     });
+    if (result.length >= MAX_CONTEXT) break;
   }
   return result;
 }

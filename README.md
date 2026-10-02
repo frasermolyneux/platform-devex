@@ -56,7 +56,8 @@ only for a bounded low- or medium-risk proposal with at most four findings in on
 Critical/blocker alerts, CI/infrastructure/auth changes and uncertain behavior remain for a
 human. A proposed PR may touch at most eight files and 250 changed lines; gated paths are
 always escalated. Stale alerts whose source files no longer exist on the default branch are
-skipped with a warning. Eligible issues are assigned to Copilot, with a requirement to preserve
+skipped with a warning; SonarCloud paths relative to a scanned `src` directory are resolved
+against GitHub before sampling. Eligible issues are assigned to Copilot, with a requirement to preserve
 observable functionality, architecture, performance and cost and run the target repository's
 relevant unit, integration and Playwright tests. Batch issues
 carry a `platform-devex-ci` label so reconciliation does not page through unrelated issue history.
