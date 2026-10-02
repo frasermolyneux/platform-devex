@@ -11,6 +11,7 @@ const FIX_MARKER = "<!-- platform-devex-ci-fix:";
 const READY_MARKER = "<!-- platform-devex-ci-ready:";
 const DELEGATE_MARKER = "<!-- devex-copilot-delegate -->";
 const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
+const COPILOT_COMMENTERS = new Set([COPILOT_REVIEWER, "copilot-pull-request-reviewer", "Copilot"]);
 const AGENT_AUTHORS = new Set(["copilot-swe-agent[bot]", "Copilot"]);
 const MAX_BATCH = 3;
 const MAX_FIXES = 2;
@@ -351,6 +352,23 @@ async function markReady(human, repo, issue, pr, dryRun) {
   }
 }
 
+async function reviewThreads(api, repo, number) {
+  const [owner, name] = repo.split("/");
+  const response = await api.request("/graphql", {
+    method: "POST",
+    body: {
+      query: "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved comments(first:100){nodes{author{login}body commit{oid}} pageInfo{hasNextPage}}} pageInfo{hasNextPage}}}}}",
+      variables: { owner, name, number },
+    },
+  });
+  const threads = response.data?.repository?.pullRequest?.reviewThreads;
+  if (response.errors?.length || !Array.isArray(threads?.nodes) || threads.pageInfo?.hasNextPage ||
+      threads.nodes.some((thread) => !Array.isArray(thread.comments?.nodes) || thread.comments.pageInfo?.hasNextPage)) {
+    throw new Error(`${repo}#${number}: cannot safely read all Copilot review threads: ${JSON.stringify(response.errors ?? response)}`);
+  }
+  return threads.nodes;
+}
+
 async function delegateCheckFailure(human, app, repo, issue, pr, sha, prComments, dryRun, appLogin) {
   const attempts = prComments.filter((comment) =>
     comment.user?.login === human.login && comment.body?.includes(DELEGATE_MARKER));
@@ -424,6 +442,15 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     await escalate(app, repo, issue, `PR #${pr.number}: ${risk}`, dryRun, appLogin);
     return;
   }
+  const closingReference = new RegExp(`\\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\\s+#${issue.number}\\b`, "gi");
+  const body = pr.body ?? "";
+  if (closingReference.test(body)) {
+    await note(`${repo}#${issue.number}: ${dryRun ? "would replace" : "replacing"} auto-closing issue reference in PR #${pr.number}.`);
+    if (!dryRun) await app.request(`/repos/${repo}/pulls/${pr.number}`, {
+      method: "PATCH", body: { body: body.replace(closingReference, `Refs #${issue.number}`) },
+    });
+    return;
+  }
   if (await updateIfBehind(app, human, repo, issue, pr, dryRun)) return;
   const [checks, status] = await Promise.all([
     app.request(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`),
@@ -463,9 +490,31 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     }
     return;
   }
-  const inline = await app.pages(`/repos/${repo}/pulls/${pr.number}/comments`);
-  const findings = inline.filter((comment) =>
-    comment.user?.login === COPILOT_REVIEWER && comment.commit_id === sha);
+  const threads = await reviewThreads(app, repo, pr.number);
+  const findings = threads.filter((thread) => !thread.isResolved &&
+    thread.comments.nodes.some((comment) =>
+      COPILOT_COMMENTERS.has(comment.author?.login) && comment.commit?.oid === sha));
+  const referenceFinding = findings.find((thread) =>
+    thread.comments.nodes.some((comment) =>
+      COPILOT_COMMENTERS.has(comment.author?.login) && comment.commit?.oid === sha &&
+      comment.body?.includes(`#${issue.number}`) &&
+      /auto-closing keyword/i.test(comment.body) && /PR description uses/i.test(comment.body)));
+  if (referenceFinding) {
+    await note(`${repo}#${issue.number}: ${dryRun ? "would resolve" : "resolving"} addressed issue-reference review thread on PR #${pr.number}.`);
+    if (!dryRun) {
+      const response = await app.request("/graphql", {
+        method: "POST",
+        body: {
+          query: "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}",
+          variables: { id: referenceFinding.id },
+        },
+      });
+      if (response.errors?.length || response.data?.resolveReviewThread?.thread?.isResolved !== true) {
+        throw new Error(`${repo}#${pr.number}: could not resolve addressed issue-reference review thread: ${JSON.stringify(response.errors ?? response)}`);
+      }
+    }
+    return;
+  }
   if (currentReview.state === "CHANGES_REQUESTED" && !findings.length) {
     await escalate(app, repo, issue, `PR #${pr.number} has a Copilot changes-requested review without actionable inline findings`, dryRun, appLogin);
     return;

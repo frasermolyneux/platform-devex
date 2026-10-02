@@ -63,7 +63,11 @@ Skipped-only checks do not count as passing. It handles failed checks on drafts 
 failures outside the sweep's check-run criteria (at most three attempts); the separate
 failed-check workflow handles non-draft check-run failures. After real validation passes, it
 requests a review of the latest commit from Copilot, delegates inline findings at most twice,
-and escalates stalled, oversized, CI-changing or unresolved work. It rechecks the PR's SHA,
+and escalates stalled, oversized, CI-changing or unresolved work. If Copilot used an
+auto-closing reference to the batch issue, the controller changes it to `Refs #...` so the
+issue stays open through post-merge verification; it resolves Copilot's corresponding
+review thread only after correcting the description. Other unresolved Copilot threads
+are delegated, not silently ignored. It rechecks the PR's SHA,
 branch freshness and GitHub merge requirements before posting a human handoff containing
 alert IDs, changed files and passing check names. Optional skipped jobs are not reported as
 passing. The pending-run approval gate releases the PR's validation runs only after the

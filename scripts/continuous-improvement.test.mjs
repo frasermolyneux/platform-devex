@@ -195,13 +195,16 @@ test("an active Copilot issue reconciles to a human handoff without creating ano
     ["/repos/owner/repo/pulls/8/reviews?per_page=100", [{
       user: { login: "copilot-pull-request-reviewer[bot]" }, commit_id: "abcd", state: "COMMENTED",
     }]],
-    ["/repos/owner/repo/pulls/8/comments?per_page=100", []],
+    ["/graphql", { data: { repository: { pullRequest: { reviewThreads: {
+      nodes: [], pageInfo: { hasNextPage: false },
+    } } } } }],
   ]);
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const path = new URL(url).pathname + new URL(url).search;
     paths.push(`${init.method} ${path}`);
     assert.ok(replies.has(path), `unexpected request: ${path}`);
+    if (path === "/graphql") assert.match(JSON.parse(init.body).query, /^query\(/);
     return new Response(JSON.stringify(replies.get(path)), { status: 200 });
   };
   try {
@@ -211,7 +214,7 @@ test("an active Copilot issue reconciles to a human handoff without creating ano
       APP_TOKEN: "app", APP_BOT_LOGIN: "app[bot]",
       COPILOT_AGENT_PAT: "human",
     });
-    assert.equal(paths.filter((path) => path.startsWith("POST ")).length, 0);
+    assert.equal(paths.filter((path) => path.startsWith("POST ") && !path.endsWith("/graphql")).length, 0);
     assert.equal(paths.filter((path) => path === "GET /user").length, 1);
     assert.equal(paths.some((path) => path.includes("/code-scanning/alerts")), false);
   } finally {
@@ -471,7 +474,7 @@ function mockImprovementPr() {
     status: { state: "pending", statuses: [] },
     behindBy: 0,
     reviews: [],
-    inline: [],
+    threads: [],
     issueComments: [],
     prComments: [],
     writes: [],
@@ -481,11 +484,26 @@ function mockImprovementPr() {
     const path = new URL(url).pathname + new URL(url).search;
     if (init.method !== "GET") {
       const body = JSON.parse(init.body);
+      if (path === "/graphql" && body.query.startsWith("query(")) {
+        return Response.json({ data: { repository: { pullRequest: { reviewThreads: {
+          nodes: state.threads, pageInfo: { hasNextPage: false },
+        } } } } });
+      }
       state.writes.push({ method: init.method, path, body, token: init.headers.Authorization });
       if (path === "/graphql") {
-        state.pr.draft = false;
-        return Response.json({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+        if (body.query.includes("markPullRequestReadyForReview")) {
+          state.pr.draft = false;
+          return Response.json({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+        }
+        if (body.query.includes("resolveReviewThread")) {
+          const thread = state.threads.find((item) => item.id === body.variables.id);
+          assert.ok(thread, "cannot resolve an unknown thread");
+          thread.isResolved = true;
+          return Response.json({ data: { resolveReviewThread: { thread: { isResolved: true } } } });
+        }
+        assert.fail(`unexpected GraphQL mutation: ${body.query}`);
       }
+      if (path === "/repos/owner/repo/pulls/8" && init.method === "PATCH") state.pr.body = body.body;
       if (path === "/repos/owner/repo/issues/7/comments") {
         state.issueComments.push({ user: { login: "app[bot]" }, body: body.body });
       }
@@ -509,7 +527,6 @@ function mockImprovementPr() {
       [`/repos/owner/repo/commits/${state.pr.head.sha}/check-runs?per_page=100`]: state.checks,
       [`/repos/owner/repo/commits/${state.pr.head.sha}/status`]: state.status,
       "/repos/owner/repo/pulls/8/reviews?per_page=100": state.reviews,
-      "/repos/owner/repo/pulls/8/comments?per_page=100": state.inline,
     };
     assert.ok(path in replies, `unexpected request: ${path}`);
     return Response.json(replies[path]);
@@ -604,6 +621,59 @@ test("Copilot changes-requested review without inline findings escalates instead
     assert.equal(state.writes.length, 1);
     assert.match(state.writes[0].body.body, /needs human attention/);
     assert.doesNotMatch(state.writes[0].body.body, /platform-devex-ci-ready:/);
+  } finally {
+    restore();
+  }
+});
+
+test("Copilot issue-reference finding is fixed and resolved before the human handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.pr.draft = false;
+    state.pr.body = "Fixes #7";
+    state.pr.mergeable_state = "blocked";
+    state.checks.check_runs[0].conclusion = "success";
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    state.threads.push({ id: "THREAD_1", isResolved: false, comments: {
+      pageInfo: { hasNextPage: false },
+      nodes: [{ author: { login: "copilot-pull-request-reviewer" }, commit: { oid: "abcd" },
+        body: "The linked issue requires referencing #7 without an auto-closing keyword, but the PR description uses `Fixes #7`." }],
+    } });
+    await run();
+    assert.equal(state.writes[0].method, "PATCH");
+    assert.equal(state.writes[0].path, "/repos/owner/repo/pulls/8");
+    assert.equal(state.writes[0].token, "Bearer app");
+    assert.equal(state.pr.body, "Refs #7");
+    await run();
+    assert.equal(state.writes[1].path, "/graphql");
+    assert.equal(state.writes[1].body.variables.id, "THREAD_1");
+    assert.equal(state.threads[0].isResolved, true);
+    state.pr.mergeable_state = "clean";
+    await run();
+    assert.match(state.writes[2].body.body, /platform-devex-ci-ready:abcd/);
+  } finally {
+    restore();
+  }
+});
+
+test("unresolved Copilot review threads delegate instead of handing off", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.pr.draft = false;
+    state.pr.mergeable_state = "clean";
+    state.checks.check_runs[0].conclusion = "success";
+    state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
+      commit_id: "abcd", state: "COMMENTED" });
+    state.threads.push({ id: "THREAD_2", isResolved: false, comments: {
+      pageInfo: { hasNextPage: false },
+      nodes: [{ author: { login: "Copilot" }, commit: { oid: "abcd" }, body: "Please fix this bug." }],
+    } });
+    await run();
+    assert.equal(state.writes.length, 1);
+    assert.equal(state.writes[0].path, "/repos/owner/repo/issues/8/comments");
+    assert.equal(state.writes[0].token, "Bearer human");
+    assert.match(state.writes[0].body.body, /@copilot please address/);
   } finally {
     restore();
   }
