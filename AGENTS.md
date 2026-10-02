@@ -103,6 +103,9 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   complete. Triaging requires an explicit opt-in, available scanners and a low-risk bounded SDK
   proposal. It must never treat a missing scanner, absent review, incomplete check set or
   third-party PR as safe; unresolved work is escalated, never auto-merged.
+- New batch issues carry the `platform-devex-ci` label in addition to their body marker; query
+  this label when locating open/closed batches so unrelated issues in the same repository do not
+  exhaust pagination. Do not remove the label from an in-progress issue.
 - The improvement controller handles draft Copilot PR failures and non-draft failures outside
   the sweep's check-run criteria with up to three same-SHA deduplicated human-PAT mentions; the
   separate failed-check action handles non-draft check-run failures. Draft PRs rely on automatic

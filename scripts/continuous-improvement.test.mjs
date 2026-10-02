@@ -7,6 +7,7 @@ import {
   analyze,
   checkState,
   diffRisk,
+  ensureBatchLabel,
   main,
   parseAllowlist,
   parseBatch,
@@ -25,6 +26,26 @@ test("batch marker ignores unrelated issues and rejects invalid IDs", () => {
   assert.deepEqual(parseBatch('<!-- platform-devex-ci-batch-v1:{"alertIds":["dependabot:15"]} -->'),
     { alertIds: ["dependabot:15"] });
   assert.throws(() => parseBatch('<!-- platform-devex-ci-batch-v1:{"alertIds":["bogus"]} -->'), /Invalid/);
+});
+
+test("missing batch label is created once and unrelated API errors are not hidden", async () => {
+  const calls = [];
+  const missing = { request: async (path, options) => {
+    calls.push({ path, options });
+    if (!options) throw new Error("GitHub GET labels returned HTTP 404");
+    return {};
+  } };
+  await ensureBatchLabel(missing, "owner/repo");
+  assert.deepEqual(calls.map(({ path }) => path), [
+    "/repos/owner/repo/labels/platform-devex-ci", "/repos/owner/repo/labels",
+  ]);
+  assert.equal(calls[1].options.method, "POST");
+  assert.equal(calls[1].options.body.name, "platform-devex-ci");
+  const present = { request: async () => ({ name: "platform-devex-ci" }) };
+  await ensureBatchLabel(present, "owner/repo");
+  await assert.rejects(ensureBatchLabel({
+    request: async () => { throw new Error("GitHub GET labels returned HTTP 403"); },
+  }, "owner/repo"), /HTTP 403/);
 });
 
 test("check state does not treat stale commit statuses as failures", () => {
@@ -144,7 +165,7 @@ test("an active Copilot issue reconciles to a human handoff without creating ano
   const paths = [];
   const replies = new Map([
     ["/user", { login: "owner" }],
-    ["/repos/owner/repo/issues?state=open&per_page=100", [{
+    ["/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100", [{
       number: 7, body: '<!-- platform-devex-ci-batch-v1:{"alertIds":["code-scanning:1"]} -->',
       user: { login: "owner" }, created_at: new Date().toISOString(),
     }]],
@@ -207,8 +228,8 @@ test("cursor-paginated alerts and an unavailable source pause intake without an 
     paths.push(`${init.method} ${path}`);
     const result = {
       "/user": { login: "owner" },
-      "/repos/owner/repo/issues?state=open&per_page=100": [],
-      "/repos/owner/repo/issues?state=closed&per_page=100": [],
+      "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [],
+      "/repos/owner/repo/issues?state=closed&labels=platform-devex-ci&per_page=100": [],
       "/repos/owner/repo/pulls?state=open&per_page=100": [],
     };
     if (path in result) return Response.json(result[path]);
@@ -244,8 +265,8 @@ test("a stale alert pointing to a deleted file is skipped without opening an iss
     paths.push(`${init.method} ${path}`);
     const result = {
       "/user": { login: "owner" },
-      "/repos/owner/repo/issues?state=open&per_page=100": [],
-      "/repos/owner/repo/issues?state=closed&per_page=100": [],
+      "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [],
+      "/repos/owner/repo/issues?state=closed&labels=platform-devex-ci&per_page=100": [],
       "/repos/owner/repo/pulls?state=open&per_page=100": [],
       "/repos/owner/repo/code-scanning/alerts?state=open&per_page=100": [{
         number: 1, rule: { id: "rule", severity: "warning" },
@@ -279,8 +300,8 @@ test("a manually closed batch issue still blocks a new batch while its linked PR
     paths.push(`${init.method} ${path}`);
     const result = {
       "/user": { login: "owner" },
-      "/repos/owner/repo/issues?state=open&per_page=100": [],
-      "/repos/owner/repo/issues?state=closed&per_page=100": [{
+      "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [],
+      "/repos/owner/repo/issues?state=closed&labels=platform-devex-ci&per_page=100": [{
         number: 7, body: '<!-- platform-devex-ci-batch-v1:{"alertIds":["dependabot:1"]} -->',
         user: { login: "owner" }, closed_at: new Date().toISOString(),
       }],
@@ -324,7 +345,7 @@ test("a malformed alert cannot be mistaken for a resolved finding after merge", 
     }
     const result = {
       "/user": { login: "owner" },
-      "/repos/owner/repo/issues?state=open&per_page=100": [{
+      "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [{
         number: 7, body: '<!-- platform-devex-ci-batch-v1:{"alertIds":["code-scanning:1"]} -->',
         user: { login: "owner" },
       }],
@@ -377,7 +398,7 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
     }
     const result = {
       "/user": { login: "owner" },
-      "/repos/owner/repo/issues?state=open&per_page=100": [{
+      "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [{
         number: 7, body: '<!-- platform-devex-ci-batch-v1:{"alertIds":["code-scanning:1"]} -->',
         user: { login: "owner" }, created_at: now,
       }],

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const BATCH_MARKER = "platform-devex-ci-batch-v1";
+const BATCH_LABEL = "platform-devex-ci";
 const ESCALATION_MARKER = "<!-- platform-devex-ci-escalated -->";
 const REVIEW_MARKER = "<!-- platform-devex-ci-review:";
 const FIX_MARKER = "<!-- platform-devex-ci-fix:";
@@ -249,7 +250,8 @@ async function addContext(api, repo, alerts) {
 }
 
 async function listIssues(api, repo, state = "open") {
-  return (await api.pages(`/repos/${repo}/issues?state=${state}`)).filter((issue) => !issue.pull_request);
+  return (await api.pages(`/repos/${repo}/issues?state=${state}&labels=${BATCH_LABEL}`))
+    .filter((issue) => !issue.pull_request);
 }
 
 async function batchIssues(api, repo, author, state = "open") {
@@ -259,6 +261,18 @@ async function batchIssues(api, repo, author, state = "open") {
     const batch = parseBatch(issue.body);
     return batch ? [{ issue, batch }] : [];
   });
+}
+
+export async function ensureBatchLabel(api, repo) {
+  try {
+    await api.request(`/repos/${repo}/labels/${BATCH_LABEL}`);
+  } catch (error) {
+    if (!error.message.endsWith("HTTP 404")) throw error;
+    await api.request(`/repos/${repo}/labels`, {
+      method: "POST",
+      body: { name: BATCH_LABEL, color: "0969da", description: "Platform developer experience improvement batch" },
+    });
+  }
 }
 
 async function comments(api, repo, issue) {
@@ -546,11 +560,13 @@ async function intake(app, human, repo, dryRun, appLogin, enabledSources) {
   ].join("\n");
   await note(`${repo}: ${dryRun ? "would create" : "creating"} a Copilot issue for ${proposal.alertIds.join(", ")}.`);
   if (!dryRun) {
+    await ensureBatchLabel(app, repo);
     const issue = await human.request(`/repos/${repo}/issues`, {
       method: "POST",
       body: {
         title: `Continuous improvement: ${clean(proposal.title, 100)}`,
         body,
+        labels: [BATCH_LABEL],
         assignees: ["copilot-swe-agent[bot]"],
         agent_assignment: {
           target_repo: repo,

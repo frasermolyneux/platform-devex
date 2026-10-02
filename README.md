@@ -51,10 +51,11 @@ impact analysis. It creates an issue **only** for a low-risk proposal with at mo
 in one directory; critical alerts and broad or uncertain work remain for a human. Stale alerts
 whose source files no longer exist on the default branch are skipped with a warning. Eligible
 issues are assigned to Copilot, with a requirement to preserve functionality, architecture and
-cost and run the target repository's relevant unit, integration and Playwright tests. The improvement
-reconciler handles failed checks on its **draft** Copilot PRs and non-draft failures outside
-the sweep's check-run criteria (at most three attempts); the separate failed-check workflow
-handles non-draft check-run failures. It waits for automatic Copilot review of
+cost and run the target repository's relevant unit, integration and Playwright tests. Batch issues
+carry a `platform-devex-ci` label so reconciliation does not page through unrelated issue history.
+The improvement reconciler handles failed checks on its **draft** Copilot PRs and non-draft
+failures outside the sweep's check-run criteria (at most three attempts); the separate
+failed-check workflow handles non-draft check-run failures. It waits for automatic Copilot review of
 draft PRs, or requests a fresh review on a ready PR, delegates inline review findings at most
 twice, and escalates stalled, oversized, CI-changing or unresolved work.
 When checks pass and the latest review has no inline findings, it posts a handoff containing
