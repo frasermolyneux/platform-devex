@@ -22,7 +22,9 @@ const EVIDENCE_REQUEST_MARKER = "<!-- platform-devex-ci-evidence-request:";
 const DELEGATE_MARKER = "<!-- devex-copilot-delegate -->";
 const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
 const COPILOT_REVIEW_CHECK = "copilot-pull-request-reviewer";
-const COPILOT_COMMENTERS = new Set([COPILOT_REVIEWER, COPILOT_REVIEW_CHECK, "Copilot"]);
+const COPILOT_COMMENTERS = new Set([
+  COPILOT_REVIEWER, COPILOT_REVIEW_CHECK, "Copilot", "copilot-swe-agent", "copilot-swe-agent[bot]",
+]);
 const AGENT_AUTHORS = new Set(["copilot-swe-agent[bot]", "Copilot"]);
 const SCAN_SOURCES = ["code-scanning", "dependabot", "sonarcloud"];
 const MAX_BATCH = 4;

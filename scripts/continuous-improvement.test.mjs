@@ -1562,6 +1562,20 @@ test("human/mixed conversations and new threads appearing before handoff are nev
   } finally { restore(); }
 });
 
+test("authenticated coding-agent replies do not turn a Copilot reviewer conversation into a human conversation", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    addThread(state, "REPLIED");
+    state.threads[0].comments.nodes.push({ author: { login: "copilot-swe-agent" },
+      body: "Added the specific regression; verify the current implementation." });
+    state.verificationDecisions.REPLIED = "resolve";
+    await run();
+    assert.equal(state.verificationCalls, 1);
+    assert.equal(state.threads[0].isResolved, true);
+  } finally { restore(); }
+});
+
 test("evidence publication preserves the human description and makes older same-head reviews ineligible", async () => {
   const { state, run, restore } = mockImprovementPr();
   try {
