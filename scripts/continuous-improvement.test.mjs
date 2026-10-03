@@ -1744,6 +1744,24 @@ test("known structured agent reports bypass probabilistic normalization while pr
   } finally { restore(); }
 });
 
+test("a known report wrapped in the canonical marker is published without redundant metadata requests or SDK normalization", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.pr.body = "Human summary\nRefs #7";
+    state.prComments = [{ id: 4, user: { login: "Copilot" }, body: marker(EVIDENCE_TAG, {
+      sha: "abcd", commit_sha: "abcd", testPaths: ["src/a.test.js"],
+      tests: [{ path: "src", command: state.report.commands[0].command, result: "passed: 1 test, 0 failed" }],
+      coverage: state.report.layers,
+    }) }];
+    await run();
+    assert.equal(state.normalizationCalls, 0);
+    assert.match(state.pr.body, /passed: 1 test, 0 failed/);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("platform-devex-ci-evidence-request:")), false);
+    assert.equal(state.verificationCalls, 0);
+  } finally { restore(); }
+});
+
 function sonarInfo() {
   return { key: "new-info", project: "owner_repo", component: "owner_repo:src/a.test.js",
     type: "CODE_SMELL", rule: "external_roslyn:IDE0058", severity: "INFO", line: 2,

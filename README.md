@@ -117,7 +117,9 @@ code/test defects at most twice, and escalates stalled, oversized, CI-changing o
 auto-closing reference to the batch issue, the controller changes it to `Refs #...` so the
 issue stays open through post-merge verification. The controller publishes an authenticated,
 current-head test report into a dedicated PR description section, preserving other description
-content. Known structured coding-agent reports are adapted deterministically; unfamiliar
+content. Known structured coding-agent reports are adapted deterministically, including
+reports wrapped in the evidence marker with the known legacy shape; conflicting head
+declarations or malformed canonical commands are never reinterpreted as success. Unfamiliar
 reports can use restricted SDK normalization. Both must copy reported commands and
 results verbatim; publication is not independent test execution. Missing reports receive one
 metadata-only request per head, outside the code-fix budget, with a 48-hour timeout.

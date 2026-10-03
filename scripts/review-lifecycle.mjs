@@ -24,6 +24,9 @@ export function evidenceReport(comments, sha, humanLogin) {
     if (!["Copilot", "copilot-swe-agent[bot]", humanLogin].includes(comment.user?.login)) continue;
     const report = readMarker(comment.body, EVIDENCE_TAG);
     if (!report || report.sha !== sha) continue;
+    if ([report.commit_sha, report.head_sha].some((head) => head !== undefined && head !== sha)) {
+      throw new EvidenceError(`Conflicting current-head test evidence in trusted comment ${comment.id}`);
+    }
     if (!Array.isArray(report.testPaths) || !report.testPaths.length || report.testPaths.length > 8 ||
         !report.testPaths.every(path) || !Array.isArray(report.commands) || !report.commands.length ||
         report.commands.length > 12 || report.commands.some((command) => !command || !text(command.command, 1000) ||
@@ -33,6 +36,8 @@ export function evidenceReport(comments, sha, humanLogin) {
         !Array.isArray(report.threads) || report.threads.length > 100 ||
         report.threads.some((thread) => !thread || !text(thread.id, 100) ||
           !["addressed", "blocked"].includes(thread.status) || !text(thread.evidence))) {
+      const adapted = structuredAgentEvidence(comment, sha, Array.isArray(report.testPaths) ? report.testPaths : []);
+      if (adapted) return adapted;
       throw new EvidenceError(`Invalid current-head test evidence in trusted comment ${comment.id}`);
     }
     return { report, comment };
@@ -40,16 +45,23 @@ export function evidenceReport(comments, sha, humanLogin) {
   return null;
 }
 
+function agentReportData(comment) {
+  const body = comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").trim();
+  const wrapped = body.match(new RegExp(`^<!-- ${EVIDENCE_TAG}:(\\{[^\\n]*\\}) -->$`));
+  return parseObjectResponse(wrapped ? wrapped[1] : body);
+}
+
 export function agentEvidenceCandidate(comments, sha) {
   return [...comments].reverse().find((comment) => {
     if (!["Copilot", "copilot-swe-agent[bot]"].includes(comment.user?.login) || !comment.body) return false;
     const body = comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").trim();
     try {
-      const data = parseObjectResponse(body);
-      return (data.sha ?? data.commit_sha ?? data.head_sha) === sha;
+      const data = agentReportData(comment);
+      const heads = [data.sha, data.commit_sha, data.head_sha].filter((value) => value !== undefined);
+      return heads.length > 0 && heads.every((head) => head === sha);
     } catch (error) {
       if (!(error instanceof ResponseError)) throw error;
-      if (/^(?:\{|\[)/.test(body)) return false;
+      if (/^(?:\{|\[|<!-- platform-devex-ci-evidence:)/.test(body)) return false;
       const escaped = sha.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       return new RegExp(`(?:^|\\n)\\s*(?:HEAD|commit(?:_sha| SHA)?)[\\s:=\`]+${escaped}(?=[\\s\`.,;]|$)`, "i").test(body);
     }
@@ -59,7 +71,7 @@ export function agentEvidenceCandidate(comments, sha) {
 function reportedText(comment) {
   const body = comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").trim();
   try {
-    const data = JSON.parse(body);
+    const data = agentReportData(comment);
     const strings = [];
     const visit = (value) => {
       if (typeof value === "string") strings.push(value);
@@ -68,7 +80,7 @@ function reportedText(comment) {
     visit(data);
     return `${body}\n${strings.join("\n")}`;
   } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
+    if (!(error instanceof ResponseError)) throw error;
     return body;
   }
 }
@@ -87,12 +99,14 @@ export function validateNormalizedEvidence(report, comment, sha) {
 export function structuredAgentEvidence(comment, sha, changedPaths) {
   let data;
   try {
-    data = parseObjectResponse(comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n"));
+    data = agentReportData(comment);
   } catch (error) {
     if (!(error instanceof ResponseError)) throw error;
     return null;
   }
-  if ((data.commit_sha ?? data.head_sha) !== sha) return null;
+  const heads = [data.sha, data.commit_sha, data.head_sha].filter((value) => value !== undefined);
+  if (!heads.length || heads.some((head) => head !== sha) ||
+      Object.hasOwn(data, "commands") || Object.hasOwn(data, "layers")) return null;
   let tests = data.tests;
   if (tests && !Array.isArray(tests) && typeof tests === "object" &&
       tests.focused_command && tests.focused_result && tests.full_command && tests.full_result) {
@@ -122,7 +136,9 @@ export function structuredAgentEvidence(comment, sha, changedPaths) {
     testPaths.push(relative);
     commands.push({ command: test.command, outcome: failed ? "failed" : "passed", details: test.result });
   }
-  return validateNormalizedEvidence({ sha, testPaths: [...new Set(testPaths)], commands, layers, threads: [] }, comment, sha);
+  const declaredPaths = Array.isArray(data.testPaths) && data.testPaths.length && data.testPaths.every(path)
+    ? data.testPaths : testPaths;
+  return validateNormalizedEvidence({ sha, testPaths: [...new Set(declaredPaths)], commands, layers, threads: [] }, comment, sha);
 }
 
 export async function normalizeAgentEvidence(comment, sha, paths, run = runReadOnlyAnalysis) {

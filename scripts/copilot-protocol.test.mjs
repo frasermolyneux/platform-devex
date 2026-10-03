@@ -36,6 +36,32 @@ test("approval's deterministic denylist blocks analyzer/build suppression config
   }
 });
 
+test("known factual report shapes inside an evidence marker adapt without inventing execution or treating historical CI status as a command", () => {
+  const payload = {
+    sha: "abcd", commit_sha: "abcd", testPaths: ["src/a.test.js"],
+    tests: [{ path: "src", command: 'node --test --test-name-pattern="specific regression" src/a.test.js',
+      result: "passed: 1 test, 0 failed" }],
+    coverage: report.layers, ci: { status: "action_required", jobs: 0 },
+    threads: [{ id: 123, status: "addressed", evidence: "Owner comment, not a review-thread ID" }],
+  };
+  const source = { ...comment, body: `> Earlier request for old commit\n\n${marker(EVIDENCE_TAG, payload)}` };
+  assert.equal(agentEvidenceCandidate([source], "abcd"), source);
+  const adapted = evidenceReport([source], "abcd", "owner");
+  assert.deepEqual(adapted.report.testPaths, ["src/a.test.js"]);
+  assert.deepEqual(adapted.report.commands, [{
+    command: payload.tests[0].command, outcome: "passed", details: payload.tests[0].result,
+  }]);
+  assert.deepEqual(adapted.report.threads, []);
+  assert.equal(adapted.comment, source);
+  for (const contradictory of [
+    { ...payload, commit_sha: "old" },
+    { ...payload, commands: [{ command: "node --test", outcome: "failed", details: "1 failed" }] },
+  ]) {
+    const invalid = { ...source, body: marker(EVIDENCE_TAG, contradictory) };
+    assert.throws(() => evidenceReport([invalid], "abcd", "owner"), /(?:Invalid|Conflicting) current-head test evidence/);
+  }
+});
+
 test("business JSON framing rejects prose, fences, multiple values, wrong types and duplicate/escaped keys", () => {
   for (const text of ["", "  ", "SECRET_PRIVATE prose", "```json\n{}\n```", "{}\n{}", "[]", "null",
     JSON.stringify({ ...approved, touches_ci: "false" }), JSON.stringify({ ...approved, extra: true }),
