@@ -70,8 +70,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: Install Copilot SDK for impact analysis
-        if: ${{ github.event.schedule == '17 5 * * *' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'intake') }}
+      - name: Install Copilot SDK for impact and review verification
         run: npm ci --no-audit --no-fund
       - name: Create repository-scoped GitHub App token
         id: app-token

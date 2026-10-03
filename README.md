@@ -27,7 +27,7 @@ from `.github/actions/`:
 - `.github/workflows/approve-copilot-runs.yml` runs `approve-copilot-workflow-runs`, which reviews
   workflow runs pending approval after Copilot coding agent commits, or Dependabot PRs recorded as
   actor `github-actions[bot]` **only** when the PR author is `dependabot[bot]`. Its deterministic
-  CI-file denylist and Copilot CLI risk review use the pending run's event-time base and head
+  CI-file denylist and restricted Copilot SDK risk review use the pending run's event-time base and head
   commits when recorded (with a logged fallback to the current PR base if the event base is
   absent). Runs triggered when the repository owner marks an improvement PR ready are also
   eligible **only** for a current, same-repository Copilot PR linked to an open, labeled batch
@@ -36,7 +36,13 @@ from `.github/actions/`:
   workflow on the current, non-draft PR head can be released. Older draft events are skipped
   even if rerun more recently; reruns preserve their original draft snapshot and can otherwise
   cancel current validation through workflow concurrency. The PR and latest run are rechecked
-  immediately before release.
+  immediately before release. The SDK captures the final assistant message rather than parsing
+  arbitrary CLI stdout. It accepts exactly one JSON object with typed verdict, CI flag and
+  reason, rejects duplicate keys, and retries a malformed protocol response once after
+  rechecking eligibility. Valid risk blocks are persisted for the same head/base and are not
+  rerolled by later sweeps. Failures expose only category, attempt count and response byte count,
+  not raw responses or credentials. Owned audit comments update to the current outcome and
+  retain their prior decisions; auditing failures make the run explicitly incomplete.
 
 Each matrix tolerates other repositories failing (`fail-fast: false`). Each workflow uploads
 activity or failure results per repository and posts one run-specific comment to the existing
@@ -96,16 +102,30 @@ requirements still apply. Unmappable cancellations, uncertain retry outcomes and
 budgets escalate to a human. It handles failed checks on drafts and non-draft
 failures outside the sweep's check-run criteria (at most three attempts); the separate
 failed-check workflow handles non-draft check-run failures. After real validation passes, it
-requests a review of the latest commit from Copilot using the entitled human PAT, delegates inline findings at most twice,
-and escalates stalled, oversized, CI-changing or unresolved work. If Copilot used an
+requests a review of the latest commit from Copilot using the entitled human PAT, delegates verified
+code/test defects at most twice, and escalates stalled, oversized, CI-changing or unresolved work. If Copilot used an
 auto-closing reference to the batch issue, the controller changes it to `Refs #...` so the
-issue stays open through post-merge verification; it resolves Copilot's corresponding
-review thread only after correcting the description. Other unresolved Copilot threads
-are delegated, not silently ignored. It rechecks the PR's SHA,
+issue stays open through post-merge verification. The controller publishes an authenticated,
+current-head test report into a dedicated PR description section, preserving other description
+content. It can normalize existing coding-agent reports, but must copy reported commands and
+results verbatim; publication is not independent test execution. Missing reports receive one
+metadata-only request per head, outside the code-fix budget, with a 48-hour timeout.
+A no-tool SDK verification compares every unresolved Copilot conversation (including outdated
+and old-commit conversations) against the current source, full patch, test wiring and reported
+execution. It independently assesses coverage even with no conversations. Only affirmatively
+verified findings are resolved, using the human PAT; uncertain findings escalate, bounded
+defects get a specific repair request, and human/mixed conversations remain untouched and block
+handoff. Description repairs and thread resolutions require another completed Copilot review,
+even at the same SHA. No blanket resolution or inference from green CI is allowed.
+It rechecks source reports, conversations, the PR's SHA,
 branch freshness and GitHub merge requirements before posting a human handoff containing
 alert IDs, changed files and passing check names. Optional skipped jobs are not reported as
-passing. The pending-run approval gate releases the PR's validation runs only after the
-separate CI-file denylist and restricted Copilot CLI risk review. **A human reviews and merges the PR.** After merging,
+passing. A native `UNSTABLE` summary can qualify for human handoff only with a complete,
+successful current-head GraphQL roll-up, native mergeability, understood effective branch
+rules and matching successful required checks/App identities and scanning tools. `BLOCKED`,
+unknown policy and incomplete roll-ups never qualify; GitHub protections are not bypassed.
+The pending-run approval gate releases the PR's validation runs only after the
+separate CI-file denylist and restricted Copilot SDK risk review. **A human reviews and merges the PR.** After merging,
 the controller verifies the target alerts are gone before closing
 the issue. An incomplete run is reported on this repository's "Continuous improvement activity
 log" issue; unavailable scanners are never treated as clean results.
@@ -114,6 +134,12 @@ Copilot review requests can return success without queuing a review when sent by
 The controller verifies a new human-authored Copilot review-request event before recording
 its per-head deduplication marker. Unverified requests fail explicitly and remain retryable;
 legacy App-request markers do not block a verified human request.
+
+An escalated batch stays paused until its owner posts a standalone
+`<!-- platform-devex-ci-resume:ESCALATION_COMMENT_ID -->` on the batch issue, naming the exact
+latest App-authored escalation. Use this only after resolving or explicitly authorizing the
+specific blocker. A resume never resets code/check repair budgets or removes scope, test,
+origin, CI or human-merge protections.
 
 Before opting in a repository:
 
@@ -170,10 +196,10 @@ GitHub's Copilot coding agent only acts on `@copilot` mentions posted by a real 
 write access and Copilot entitlement — it silently ignores mentions authored by a GitHub App or
 other bot identity. It also gates Copilot's own pushes behind manual workflow-run approval the
 same way it gates first-time-contributor forks, and the `approve-copilot-workflow-runs` release
-step (`.../actions/runs/{id}/rerun`) still needs an authenticated Copilot CLI call, run under the
+step (`.../actions/runs/{id}/rerun`) still needs an authenticated Copilot SDK call, run under the
 same human account, to produce its risk-review verdict. Since the maintenance workflows otherwise
 run on the shared GitHub App's installation tokens, one fine-grained personal access token
-(`secrets.COPILOT_AGENT_PAT`) is used for the delegation comment, the CLI risk-review call,
+(`secrets.COPILOT_AGENT_PAT`) is used for the delegation comment, the SDK risk-review call,
 the improvement controller's Copilot issue assignment, PR follow-up comments,
 ready-for-review transition, branch updates, Copilot review requests and review-thread resolution, and the
 restricted SDK analysis session. The improvement controller uses its scoped App token
@@ -205,7 +231,7 @@ rotate it rather than editing its permissions, update `COPILOT_AGENT_PAT` with t
 Rotate it like any other credential; if the secret is missing (empty), `delegate-failed-checks`
 falls back to the GitHub App token and still posts comments, but Copilot will not act on them,
 and `approve-copilot-workflow-runs` fails closed (leaves every run pending) since it cannot
-authenticate the CLI. If the PAT is instead revoked or expired (a non-empty but invalid value),
+authenticate the SDK. If the PAT is instead revoked or expired (a non-empty but invalid value),
 the fallback does not apply: `delegate-failed-checks`'s `gh api user` lookup fails and that step
 aborts, so remove or replace the secret rather than leaving a revoked value in place.
 

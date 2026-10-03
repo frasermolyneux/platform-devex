@@ -96,13 +96,14 @@ jobs:
           APPROVED_COUNT: ${{ steps.approve-copilot-workflow-runs.outputs.approved_count }}
           APPROVED_PRS: ${{ steps.approve-copilot-workflow-runs.outputs.approved_pull_requests }}
           BLOCKED_COUNT: ${{ steps.approve-copilot-workflow-runs.outputs.blocked_count }}
+          AUDIT_UPDATES: ${{ steps.approve-copilot-workflow-runs.outputs.audit_updates }}
         run: |
           set -euo pipefail
           FAILED=false
           if [[ "$CHECKOUT_OUTCOME" != "success" || "$APP_TOKEN_OUTCOME" != "success" || "$ACTION_OUTCOME" != "success" ]]; then
             FAILED=true
           fi
-          TOTAL=$(( ${APPROVED_COUNT:-0} + ${BLOCKED_COUNT:-0} ))
+          TOTAL=$(( ${APPROVED_COUNT:-0} + ${BLOCKED_COUNT:-0} + ${AUDIT_UPDATES:-0} ))
           if [[ "$FAILED" == "false" && "$TOTAL" -eq 0 ]]; then
             echo "has_activity=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -110,9 +111,9 @@ jobs:
           echo "has_activity=true" >> "$GITHUB_OUTPUT"
 
           if [[ "$FAILED" == "true" ]]; then
-            echo "| ${REPO} | ⚠️ sweep failed - see run logs | |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ${REPO} | ⚠️ sweep failed - see run logs | | |" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "| ${REPO} | ${APPROVED_COUNT} (${APPROVED_PRS:-}) | ${BLOCKED_COUNT} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ${REPO} | ${APPROVED_COUNT} (${APPROVED_PRS:-}) | ${BLOCKED_COUNT} | ${AUDIT_UPDATES:-0} |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           mkdir -p "${RUNNER_TEMP}/sweep-result"
@@ -122,7 +123,8 @@ jobs:
             --argjson approved "${APPROVED_COUNT:-0}" \
             --arg approved_prs "${APPROVED_PRS:-}" \
             --argjson blocked "${BLOCKED_COUNT:-0}" \
-            '{repo: $repo, failed: $failed, approved: $approved, approved_prs: $approved_prs, blocked: $blocked}' \
+            --argjson audit_updates "${AUDIT_UPDATES:-0}" \
+            '{repo: $repo, failed: $failed, approved: $approved, approved_prs: $approved_prs, blocked: $blocked, audit_updates: $audit_updates}' \
             > "${RUNNER_TEMP}/sweep-result/repo-${REPO}.json"
 
       - name: Upload activity result
@@ -188,10 +190,10 @@ jobs:
               echo ""
             fi
             if [[ "$HAS_RESULTS" == "true" ]]; then
-              echo "| Repo | Runs approved | Runs left blocked |"
-              echo "| --- | --- | --- |"
+              echo "| Repo | Runs approved | Runs left blocked | Audits updated |"
+              echo "| --- | --- | --- | --- |"
               for f in results/*.json; do
-                jq -r 'if .failed then [.repo, "⚠️ FAILED - see run logs", ""] else [.repo, (.approved | tostring) + " (" + .approved_prs + ")", (.blocked | tostring)] end | "| " + join(" | ") + " |"' "$f"
+                jq -r 'if .failed then [.repo, "⚠️ FAILED - see run logs", "", ""] else [.repo, (.approved | tostring) + " (" + .approved_prs + ")", (.blocked | tostring), (.audit_updates | tostring)] end | "| " + join(" | ") + " |"' "$f"
               done
             else
               echo "No per-repository results were produced for this run."

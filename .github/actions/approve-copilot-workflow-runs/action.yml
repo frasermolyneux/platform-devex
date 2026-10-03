@@ -1,18 +1,18 @@
 name: "approve-copilot-workflow-runs"
-description: "Reviews only the latest current-head, non-draft PR workflow runs awaiting approval, releasing trusted automation after a deterministic CI-file denylist and Copilot CLI risk review"
+description: "Reviews only the latest current-head, non-draft PR workflow runs awaiting approval, releasing trusted automation after a deterministic CI-file denylist and no-tool Copilot SDK risk review"
 
 inputs:
   github-token:
     description: "Token with actions:write (list, rerun, and release pending workflow runs), pull-requests:read, contents:read, and issues:write (used to post the review-decision comment) on the target repository"
     required: true
   copilot-token:
-    description: "Fine-grained personal access token from a human account with Copilot entitlement and the 'Copilot Requests' permission. Used only to authenticate the local Copilot CLI review; never used for any repository write."
+    description: "Fine-grained personal access token from a human account with Copilot entitlement and the 'Copilot Requests' permission. Used only as the no-tool Copilot SDK session identity; never used for any repository write."
     required: true
   repository:
     description: "Target repository in owner/repo form"
     required: true
   copilot-model:
-    description: "Model passed to the Copilot CLI for the risk review"
+    description: "Model passed to the Copilot SDK for the risk review"
     required: false
     default: "claude-haiku-4.5"
   dry-run:
@@ -20,15 +20,14 @@ inputs:
     required: false
     default: "false"
   bot-login:
-    description: "Login (e.g. 'my-app[bot]') of the identity github-token actually posts comments as. When set, audit-comment dedup requires an exact match on this login instead of merely any Bot-type account, so another installed bot cannot pre-post a matching marker/sha comment to suppress ours. Leave unset only if the calling workflow cannot resolve its own App slug; the weaker Bot-type-only check is used as a fallback."
-    required: false
-    default: ""
+    description: "Exact App bot login that owns audit comments and persisted risk decisions; other bots cannot suppress or forge them"
+    required: true
   extra-trusted-actors:
     description: "Comma-separated additional workflow-run actor logins (beyond the always-trusted 'Copilot') to consider for release, e.g. 'github-actions[bot]' for Dependabot-triggered pull requests. A run's actor login alone is often not specific enough to trust (e.g. 'github-actions[bot]' is the recorded actor for many unrelated action_required cases), so any actor listed here is additionally required to match extra-trusted-pr-authors on the run's pull request before it is reviewed; otherwise it is left pending for human approval."
     required: false
     default: ""
   extra-trusted-pr-authors:
-    description: "Comma-separated pull request author logins (e.g. 'dependabot[bot]') required to authorize a run whose actor matched extra-trusted-actors. Ignored for the always-trusted 'Copilot' actor, which needs no additional author check."
+    description: "Comma-separated pull request author logins (e.g. 'dependabot[bot]') required to authorize a run whose actor matched extra-trusted-actors. Copilot runs instead require a classified same-repository automated PR."
     required: false
     default: ""
   improvement-actor:
@@ -46,6 +45,9 @@ outputs:
   blocked_count:
     description: "Number of workflow runs left pending for human approval"
     value: ${{ steps.review.outputs.blocked_count }}
+  audit_updates:
+    description: "Number of stale approval audit comments updated to their current outcome"
+    value: ${{ steps.review.outputs.audit_updates }}
 
 runs:
   using: "composite"
@@ -55,9 +57,9 @@ runs:
       with:
         node-version: "22"
 
-    - name: Install GitHub Copilot CLI
+    - name: Install locked Copilot SDK runtime
       shell: bash
-      run: npm install --global --ignore-scripts @github/copilot@1.0.89
+      run: npm ci --prefix "${GITHUB_ACTION_PATH}/../../.." --no-audit --no-fund
 
     - name: Review and approve pending Copilot workflow runs
       id: review
@@ -106,12 +108,15 @@ runs:
 
         APPROVED=()
         BLOCKED=()
+        AUDIT_UPDATES=0
+        AUDIT_FAILED=false
         # Keyed by "PR_NUM:HEAD_SHA" so a single commit that produced several
-        # pending workflow runs (a common case) is reviewed and metered
-        # against the Copilot CLI exactly once, and gets exactly one
+        # pending workflow runs (a common case) shares one bounded SDK review
+        # and gets exactly one current
         # decision comment, instead of once per run.
         declare -A VERDICT_CACHE
         declare -A REASON_CACHE
+        declare -A RISK_RECORD_CACHE
         latest_run_ids() {
           local history
           history=$(gh api "repos/${REPOSITORY}/actions/workflows/${WORKFLOW_ID}/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=100" --paginate --jq '.') || return 1
@@ -186,7 +191,14 @@ runs:
                 BLOCKED+=("${RUN_ID}")
                 continue
               fi
-            elif [[ "$ACTOR_LOGIN" != "Copilot" ]]; then
+            elif [[ "$ACTOR_LOGIN" == "Copilot" ]]; then
+              AUTOMATION=$(printf '%s' "$PR_JSON" | node "${GITHUB_ACTION_PATH}/../delegate-failed-checks/eligibility.mjs" "$REPOSITORY")
+              if [[ "$AUTOMATION" != "copilot" && "$AUTOMATION" != "dependabot" ]]; then
+                echo "Run ${RUN_ID} (PR #${PR_NUM}): Copilot run is not on a trusted automated PR; leaving for human approval"
+                BLOCKED+=("${RUN_ID}")
+                continue
+              fi
+            else
               PR_AUTHOR=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}" --jq '.user.login')
               AUTHOR_TRUSTED=false
               IFS=',' read -ra TRUSTED_AUTHORS <<< "${EXTRA_TRUSTED_PR_AUTHORS}"
@@ -209,26 +221,22 @@ runs:
             # Included in the cache key alongside PR + head sha so a run
             # whose base has moved since an earlier cached verdict never
             # reuses a review of a different (now-stale) diff range.
-            CACHE_KEY="${PR_NUM}:${HEAD_SHA}:${EVENT_BASE_SHA}"
+            BASE_SHA="${EVENT_BASE_SHA:-$(echo "$PR_JSON" | jq -r '.base.sha')}"
+            if [[ -z "$EVENT_BASE_SHA" ]]; then
+              echo "Run ${RUN_ID}: no event-time base sha recorded, using current PR base ${BASE_SHA}"
+            fi
+            CACHE_KEY="${PR_NUM}:${HEAD_SHA}:${BASE_SHA}"
             if [[ -n "${VERDICT_CACHE[$CACHE_KEY]+set}" ]]; then
               VERDICT="${VERDICT_CACHE[$CACHE_KEY]}"
               REASON="${REASON_CACHE[$CACHE_KEY]}"
+              RISK_RECORD="${RISK_RECORD_CACHE[$CACHE_KEY]}"
               echo "Run ${RUN_ID}: reusing cached review for PR #${PR_NUM} @ ${HEAD_SHA}"
             else
 
             VERDICT="block"
             REASON="not evaluated"
             CI_TOUCHED=false
-
-            if [[ -n "$EVENT_BASE_SHA" ]]; then
-              BASE_SHA="$EVENT_BASE_SHA"
-            else
-              # Fallback for the rare case the run's own pull_requests entry
-              # has no base sha recorded - still better than nothing, but
-              # logged since it carries the base-drift risk above.
-              BASE_SHA=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}" --jq '.base.sha')
-              echo "Run ${RUN_ID}: no event-time base sha recorded, falling back to current PR base ${BASE_SHA}"
-            fi
+            RISK_RECORD=""
 
             # Fetch the raw diff once, for the same BASE_SHA...HEAD_SHA
             # range the pending run was triggered from - never a
@@ -347,84 +355,65 @@ runs:
               } > "$PROMPT_FILE"
 
               RESPONSE_FILE=$(mktemp)
-              STDERR_FILE=$(mktemp)
-              # This review needs no tools at all - it only has to read the
-              # diff already embedded in the prompt and return a verdict.
-              # "none-required" is not a real tool kind name; passing it as
-              # the sole --available-tools value makes every real tool kind
-              # (including the otherwise-default-available read-only "view"
-              # kind) entirely unavailable for the session - verified
-              # locally that shell, fetch, write, and view are all genuinely
-              # blocked under this pattern (unlike --deny-tool, which only
-              # blocks the specific kinds named and leaves everything else
-              # reachable). --no-custom-instructions additionally stops any
-              # repository or home-directory Copilot instructions file from
-              # being loaded into the prompt, since those are additional
-              # untrusted-content surface on a runner that may have an
-              # untrusted checkout. GH_TOKEN/COPILOT_TOKEN are also stripped
-              # from the subprocess environment so only the narrowly-scoped
-              # Copilot Requests PAT is ever visible to it.
-              # Stdout (the model's actual response) and stderr are kept in
-              # separate files. "none-required" is deliberately not a real
-              # tool kind name (see below), and the CLI logs a diagnostic
-              # about that unknown allowlist entry to stderr on every run;
-              # merging the two streams would permanently prepend that
-              # diagnostic to the response and make the whole-response JSON
-              # check below fail on every single invocation, regardless of
-              # what the model actually returned.
-              if env -u GH_TOKEN -u COPILOT_TOKEN COPILOT_GITHUB_TOKEN="$COPILOT_TOKEN" copilot -p "$(cat "$PROMPT_FILE")" \
-                --available-tools=none-required --disable-builtin-mcps --no-custom-instructions --silent --model "$COPILOT_MODEL" \
-                >"$RESPONSE_FILE" 2>"$STDERR_FILE"; then
-                # Require the entire trimmed response to be exactly one JSON
-                # value matching the schema - not merely a substring
-                # extracted from it. `jq -e .` fails on any leading/trailing
-                # prose or a second JSON value, so a prompt-injected response
-                # that smuggles an extra "approve" object alongside its real
-                # verdict fails closed instead of being silently accepted.
-                VERDICT_JSON=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$RESPONSE_FILE")
-                if [[ -n "$VERDICT_JSON" ]] && echo "$VERDICT_JSON" | jq -e '
-                    type == "object"
-                    and (.verdict == "approve" or .verdict == "block")
-                    and ((.touches_ci | type) == "boolean")
-                    and ((.reason | type) == "string")
-                  ' >/dev/null 2>&1; then
-                  MODEL_VERDICT=$(echo "$VERDICT_JSON" | jq -r '.verdict')
-                  MODEL_TOUCHES_CI=$(echo "$VERDICT_JSON" | jq -r '.touches_ci')
-                  REASON=$(echo "$VERDICT_JSON" | jq -r '.reason')
-                  if [[ "$MODEL_VERDICT" == "approve" && "$MODEL_TOUCHES_CI" == "false" ]]; then
-                    VERDICT="approve"
-                  else
-                    REASON="model recommended human review: ${REASON}"
-                  fi
-                else
-                  REASON="Copilot CLI response failed schema validation (missing/invalid verdict, touches_ci, or reason fields); failing closed"
+              REVIEW_OK=true
+              REVIEW_PR_NUM="$PR_NUM" REVIEW_HEAD_SHA="$HEAD_SHA" REVIEW_RUN_ID="$RUN_ID" REVIEW_BASE_SHA="$BASE_SHA" \
+                REVIEW_CURRENT_BASE_SHA="$(echo "$PR_JSON" | jq -r '.base.sha')" \
+                node "${GITHUB_ACTION_PATH}/risk-review.mjs" "$PROMPT_FILE" > "$RESPONSE_FILE" || REVIEW_OK=false
+              if [[ -s "$RESPONSE_FILE" ]]; then
+                CATEGORY=$(jq -r '.diagnostics.category' "$RESPONSE_FILE")
+                echo "Risk-review protocol: category=${CATEGORY}, attempts=$(jq -r '.diagnostics.attempts' "$RESPONSE_FILE"), bytes=$(jq -r '.diagnostics.bytes' "$RESPONSE_FILE")"
+                REASON=$(jq -r '.reason' "$RESPONSE_FILE")
+                if [[ "$REVIEW_OK" == "true" && "$CATEGORY" == "valid" ]] &&
+                   jq -e '.verdict == "approve" and .touches_ci == false' "$RESPONSE_FILE" >/dev/null; then
+                  VERDICT="approve"
+                elif [[ "$CATEGORY" == "valid" ]]; then
+                  RISK_RECORD=$(jq -c --arg sha "$HEAD_SHA" --arg base "$BASE_SHA" \
+                    '{sha:$sha,base:$base,verdict:"block",touches_ci,reason}' "$RESPONSE_FILE")
+                  REASON="model recommended human review: ${REASON}"
                 fi
               else
-                REASON="Copilot CLI review failed to run; failing closed"
+                REASON="Copilot SDK transport/setup failed; failing closed"
+                echo "::warning::risk-review response unavailable; no raw response or credentials retained"
               fi
-
-              rm -f "$PROMPT_FILE" "$RESPONSE_FILE" "$STDERR_FILE"
+              rm -f "$PROMPT_FILE" "$RESPONSE_FILE"
               fi
             fi
 
             VERDICT_CACHE[$CACHE_KEY]="$VERDICT"
             REASON_CACHE[$CACHE_KEY]="$REASON"
+            RISK_RECORD_CACHE[$CACHE_KEY]="$RISK_RECORD"
             fi
 
             if [[ "$VERDICT" == "approve" ]]; then
               CURRENT_RUN=$(gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}")
               LATEST_IDS=$(latest_run_ids)
               CURRENT_PR=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUM}")
-              if ! echo "$CURRENT_PR" | jq -e --arg repo "$REPOSITORY" --arg head "$HEAD_SHA" '
+              if [[ -n "$IMPROVEMENT_ACTOR" && "$ACTOR_LOGIN" == "$IMPROVEMENT_ACTOR" ]]; then
+                CURRENT_ISSUE=$(echo "$CURRENT_PR" | jq -r '[.body // "" | scan("#[0-9]+") | ltrimstr("#")] | unique | if length == 1 then .[0] else empty end')
+                ISSUE_JSON=$(gh api "repos/${REPOSITORY}/issues/${ISSUE_NUM}")
+                if [[ "$CURRENT_ISSUE" != "$ISSUE_NUM" ]] || ! echo "$ISSUE_JSON" | jq -e --arg actor "$IMPROVEMENT_ACTOR" '
+                  .user.login == $actor and .state == "open"
+                  and any(.labels[]?; .name == "platform-devex-ci")
+                  and (.body | startswith("<!-- platform-devex-ci-batch-v1:"))
+                  and (.assignee.login == "Copilot" or .assignee.login == "copilot-swe-agent[bot]")
+                ' >/dev/null; then
+                  echo "Run ${RUN_ID}: active improvement batch changed during review; skipping release"
+                  continue
+                fi
+              fi
+              if ! echo "$CURRENT_PR" | jq -e --arg repo "$REPOSITORY" --arg head "$HEAD_SHA" \
+                --arg base "$(echo "$PR_JSON" | jq -r '.base.sha')" --arg author "$(echo "$PR_JSON" | jq -r '.user.login')" \
+                --arg branch "$(echo "$PR_JSON" | jq -r '.head.ref')" '
                 .state == "open" and .draft == false and .head.sha == $head
                 and .head.repo.full_name == $repo and .base.repo.full_name == $repo
+                and .base.sha == $base and .user.login == $author and .head.ref == $branch
               ' >/dev/null || ! grep -qx "$RUN_ID" <<< "$LATEST_IDS" ||
                  ! echo "$CURRENT_RUN" | jq -e '.conclusion == "action_required" or .status == "action_required"' >/dev/null; then
                 echo "Run ${RUN_ID} (PR #${PR_NUM}): PR or latest workflow state changed during review; skipping release"
                 continue
               fi
               if [[ "$DRY_RUN" == "true" ]]; then
-                echo "Dry-run: would release run ${RUN_ID} (PR #${PR_NUM}): ${REASON}"
+                echo "Dry-run: would release run ${RUN_ID} (PR #${PR_NUM}); verdict=approve"
               else
                 # The `.../actions/runs/{id}/approve` endpoint only accepts
                 # runs "from a fork pull request or queued by the Actions
@@ -440,68 +429,35 @@ runs:
                 # was verified empirically to move a real pending run from
                 # conclusion=action_required to status=queued.
                 gh api -X POST "repos/${REPOSITORY}/actions/runs/${RUN_ID}/rerun" --silent
-                echo "Released run ${RUN_ID} (PR #${PR_NUM}) via rerun: ${REASON}"
+                echo "Released run ${RUN_ID} (PR #${PR_NUM}) via rerun; verdict=approve"
               fi
               APPROVED+=("${PR_NUM}")
-              COMMENT_BODY=$(printf '%s<!-- sha:%s:%s -->\nAuto-approved workflow run(s) for this commit after an automated risk review: %s' "$MARKER" "$HEAD_SHA" "$EVENT_BASE_SHA" "$REASON")
+              COMMENT_BODY=$(printf '%s<!-- sha:%s:%s -->\nAuto-approved workflow run(s) for this commit after an automated risk review: %s' "$MARKER" "$HEAD_SHA" "$BASE_SHA" "$REASON")
             else
-              echo "Left run ${RUN_ID} (PR #${PR_NUM}) pending human approval: ${REASON}"
+              echo "Left run ${RUN_ID} (PR #${PR_NUM}) pending human approval; verdict=block"
               BLOCKED+=("${PR_NUM}")
-              COMMENT_BODY=$(printf '%s<!-- sha:%s:%s -->\nLeft workflow run(s) for this commit pending manual approval after an automated risk review: %s' "$MARKER" "$HEAD_SHA" "$EVENT_BASE_SHA" "$REASON")
+              COMMENT_BODY=$(printf '%s<!-- sha:%s:%s -->\nLeft workflow run(s) for this commit pending manual approval after an automated risk review: %s' "$MARKER" "$HEAD_SHA" "$BASE_SHA" "$REASON")
             fi
 
-            # Dedup on marker + head sha + base sha (not run id) so a commit
-            # that produced several pending runs gets exactly one decision
-            # comment, and re-runs of this sweep do not spam the same
-            # pull request with repeats about a commit already decided. The
-            # base sha is included alongside the head sha because the
-            # verdict cache key also distinguishes it (CACHE_KEY above): two
-            # pending runs can share a head sha but have been triggered
-            # against different bases (and therefore reviewed as different
-            # diff ranges with potentially different verdicts), and a
-            # head-only marker would wrongly suppress the second one's
-            # audit comment as if it were a duplicate of the first.
-            # Both MARKER and the sha tag must be present, and (when
-            # BOT_LOGIN is supplied) the comment must have been posted by
-            # that exact login - matching only .user.type == "Bot" would
-            # accept a marker/sha comment forged by any other installed bot
-            # in the repository, not just the one github-token authenticates
-            # as, letting it suppress our audit comment the same way a
-            # human PR participant could. Falls back to the weaker
-            # Bot-type-only check if the caller has no login to supply.
-            # `gh api --jq` does not accept extra jq flags like `--arg`; emit
-            # one comment object per line across all pages via --jq '.[]',
-            # then slurp into external `jq -s` (which does support `--arg`)
-            # for the marker/sha/author containment check, matching the
-            # pattern in delegate-failed-checks/action.yml:116-130. A
-            # failure here must never abort the loop after we have already
-            # approved a run. Neither the lookup nor the post is allowed to
-            # be fatal at this point - by this point in the loop the run may
-            # already be approved, so a `set -e` abort here would silently
-            # skip the audit comment, all remaining pending runs, and the
-            # step outputs. If the lookup itself fails we cannot tell
-            # whether a comment already exists, so we skip posting (a
-            # missing audit comment is preferable to risking a duplicate
-            # spam loop on a transient API error).
-            LOOKUP_OK=true
-            COMMENTS_RAW=$(gh api "repos/${REPOSITORY}/issues/${PR_NUM}/comments?per_page=100" --paginate --jq '.[]') || LOOKUP_OK=false
-            EXISTING_COMMENTS=""
-            if [[ "$LOOKUP_OK" == "true" && -n "$COMMENTS_RAW" ]]; then
-              if [[ -n "$BOT_LOGIN" ]]; then
-                EXISTING_COMMENTS=$(printf '%s\n' "$COMMENTS_RAW" | jq -s -r --arg marker "$MARKER" --arg sha "$HEAD_SHA" --arg base "$EVENT_BASE_SHA" --arg login "$BOT_LOGIN" \
-                  '.[] | select(.user.login == $login) | select(.body | contains($marker)) | select(.body | contains("<!-- sha:" + $sha + ":" + $base + " -->")) | .id') || true
+            if [[ "$DRY_RUN" != "true" ]]; then
+              COMMENT_FILE=$(mktemp)
+              printf '%s' "$COMMENT_BODY" > "$COMMENT_FILE"
+              if RESULT=$(REVIEW_PR_NUM="$PR_NUM" REVIEW_HEAD_SHA="$HEAD_SHA" REVIEW_BASE_SHA="$BASE_SHA" REVIEW_RISK_RECORD="$RISK_RECORD" \
+                node "${GITHUB_ACTION_PATH}/approval-audit.mjs" decision "$COMMENT_FILE"); then
+                if [[ "$RESULT" == "updated" ]]; then AUDIT_UPDATES=$((AUDIT_UPDATES + 1)); fi
               else
-                EXISTING_COMMENTS=$(printf '%s\n' "$COMMENTS_RAW" | jq -s -r --arg marker "$MARKER" --arg sha "$HEAD_SHA" --arg base "$EVENT_BASE_SHA" \
-                  '.[] | select(.user.type == "Bot") | select(.body | contains($marker)) | select(.body | contains("<!-- sha:" + $sha + ":" + $base + " -->")) | .id') || true
+                AUDIT_FAILED=true
+                echo "::warning::approval audit failed for PR #${PR_NUM}; remaining runs will still be processed"
               fi
-            fi
-            if [[ "$LOOKUP_OK" == "true" && -z "$EXISTING_COMMENTS" && "$DRY_RUN" != "true" ]]; then
-              gh api "repos/${REPOSITORY}/issues/${PR_NUM}/comments" -f body="$COMMENT_BODY" --silent \
-                || echo "::warning::failed to post audit comment on PR #${PR_NUM} for ${HEAD_SHA}"
-            elif [[ "$LOOKUP_OK" == "false" ]]; then
-              echo "::warning::failed to look up existing comments on PR #${PR_NUM}; skipping audit comment for ${HEAD_SHA} to avoid duplicate risk"
+              rm -f "$COMMENT_FILE"
             fi
           done <<< "$RUN_IDS_RAW"
+        fi
+        if UPDATED=$(node "${GITHUB_ACTION_PATH}/approval-audit.mjs" reconcile); then
+          AUDIT_UPDATES=$((AUDIT_UPDATES + UPDATED))
+        else
+          AUDIT_FAILED=true
+          echo "::warning::stale approval audit reconciliation failed explicitly"
         fi
 
         APPROVED_COUNT=${#APPROVED[@]}
@@ -513,4 +469,9 @@ runs:
           echo "approved_count=${APPROVED_COUNT}"
           echo "approved_pull_requests=${APPROVED_JOINED}"
           echo "blocked_count=${BLOCKED_COUNT}"
+          echo "audit_updates=${AUDIT_UPDATES}"
         } >> "$GITHUB_OUTPUT"
+        if [[ "$AUDIT_FAILED" == "true" ]]; then
+          echo "::error::approval auditing is incomplete; see the explicit audit failures above"
+          exit 1
+        fi

@@ -25,12 +25,16 @@ on and run locally vendored composite actions against each:
   (actor `github-actions[bot]`, only trusted when paired with pull request author
   `dependabot[bot]`). It also considers repository-owner-triggered ready-for-review runs only
   when the current PR is a same-repository Copilot PR linked to an active labeled improvement
-  issue authored by that owner. All eligible runs pass a deterministic CI-file denylist and an automated Copilot CLI
+  issue authored by that owner. All eligible runs pass a deterministic CI-file denylist and an automated no-tool Copilot SDK
   risk review of the pending run's event-base-to-head diff when that base is recorded (with a
   logged current-PR-base fallback); anything ambiguous is left pending. Release only the latest
   original `pull_request` event per workflow for the current non-draft head, including all
   statuses when selecting the latest event. Never order by rerun time/attempt: old draft
   snapshots can skip jobs and cancel newer real validation. Recheck current PR/run state before release.
+  Capture the final SDK message and require exactly one typed JSON object, rejecting duplicate
+  keys. Retry malformed protocol output once, never a valid risk block; persist valid blocks
+  per head/base. Log only safe category/attempt/byte diagnostics. Update owned audit comments
+  on transitions with retained history; audit failures must report incomplete activity.
 - Each workflow's **summarize** job collects its own per-repository activity (or failures) into
   one run-specific comment on this repository's "Self-heal activity log" tracking issue, using
   the default `github.token` (not the App token) since it only ever writes to this repository.
@@ -85,10 +89,11 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   `@copilot` mentions authored by a GitHub App/bot identity and only acts on mentions from a real
   user with write access and Copilot entitlement, and to `approve-copilot-workflow-runs`'
   `copilot-token` input, which needs a human account with Copilot entitlement to authenticate the
-  CLI risk-review call. The improvement controller also uses this same token for Copilot issue
-  assignment, PR follow-up comments and a restricted, no-tool SDK analysis session; its other
-  target-repository operations use a scoped App
-  token. Other inputs on the two maintenance actions continue to use the GitHub App token.
+  SDK risk-review call. The improvement controller also uses this same token for Copilot issue
+  assignment, PR follow-up comments, branch updates, ready-for-review transitions, review
+  requests, verified thread resolution and restricted no-tool SDK analysis/verification.
+  Target reads, description/evidence and audit publication, and bounded validation recovery
+  use a scoped App token. Other inputs on the two maintenance actions continue to use the GitHub App token.
   If this secret is ever removed (empty), delegation comments still
   post (via the `github-token` fallback) but Copilot will not act on them, and
   `approve-copilot-workflow-runs` fails closed (leaves every run pending). If it is instead
@@ -144,11 +149,18 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   non-draft check-run failures. Request Copilot reviews after passing validation using the
   entitled human PAT, not the App token (which can silently ignore a successful request).
   Verify a new human-authored Copilot review-request timeline event before writing the per-head
-  marker; legacy App-request markers must not suppress a verified request. Unresolved Copilot
-  review threads must be addressed before handoff. Auto-closing issue
-  references in the PR description are replaced with `Refs #...` to retain the batch issue
-  for post-merge verification, then only the corresponding review thread is resolved
-  using the human PAT (GitHub rejects the App token for this mutation).
+  marker; legacy App-request markers must not suppress a verified request. Publish authenticated,
+  current-head test evidence into the controller-owned PR section; normalized reports must
+  preserve actual reported commands/results, never invent execution. Metadata-only evidence
+  requests do not consume code repair attempts. Compare every unresolved Copilot conversation,
+  including outdated/old-head threads, against current source, full patches and test wiring
+  before resolving with the human PAT. Independently assess coverage with zero conversations.
+  Human/mixed threads block handoff and are never resolved automatically. Metadata repairs and
+  resolutions require a fresh completed review even at the same SHA. Recheck evidence, origin,
+  head, conversations and CI before writes/handoff. A narrowly verified complete successful
+  roll-up may allow UNSTABLE human handoff, never BLOCKED/unknown/incomplete protections.
+  Owner resume markers must name the exact latest App escalation and never reset budgets.
+  Replace auto-closing issue references with `Refs #...` for post-merge verification.
 - The single user-owned `COPILOT_AGENT_PAT` needs Metadata: read, Actions, Contents, Issues
   and Pull requests: read/write on every opted-in repository for the preview issue-assignment
   API, plus account-level Copilot Requests: read for CLI review. Never provision it through
