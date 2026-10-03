@@ -41,8 +41,19 @@ export function evidenceReport(comments, sha, humanLogin) {
 }
 
 export function agentEvidenceCandidate(comments, sha) {
-  return [...comments].reverse().find((comment) => ["Copilot", "copilot-swe-agent[bot]"].includes(comment.user?.login) &&
-    comment.body?.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").includes(sha)) ?? null;
+  return [...comments].reverse().find((comment) => {
+    if (!["Copilot", "copilot-swe-agent[bot]"].includes(comment.user?.login) || !comment.body) return false;
+    const body = comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").trim();
+    try {
+      const data = parseObjectResponse(body);
+      return (data.sha ?? data.commit_sha ?? data.head_sha) === sha;
+    } catch (error) {
+      if (!(error instanceof ResponseError)) throw error;
+      if (/^(?:\{|\[)/.test(body)) return false;
+      const escaped = sha.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(?:^|\\n)\\s*(?:HEAD|commit(?:_sha| SHA)?)[\\s:=\`]+${escaped}(?=[\\s\`.,;]|$)`, "i").test(body);
+    }
+  }) ?? null;
 }
 
 function reportedText(comment) {

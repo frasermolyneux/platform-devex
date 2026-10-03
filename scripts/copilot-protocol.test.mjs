@@ -116,6 +116,8 @@ test("agent completion reports are normalized without accepting quoted requests,
   })}` };
   assert.equal(agentEvidenceCandidate([{ ...source, body: "> requested abcd\nold report" }], "abcd"), null);
   assert.equal(agentEvidenceCandidate([{ ...source, user: { login: "attacker" } }], "abcd"), null);
+  assert.equal(agentEvidenceCandidate([{ ...source, body: '{"commit_sha":"old","ci":"requested abcd"}' }], "abcd"), null);
+  assert.equal(agentEvidenceCandidate([{ ...source, body: "HEAD abcd; tests passed" }], "abcd").id, source.id);
   const result = await normalizeAgentEvidence(source, "abcd", ["src/a.js"], async (prompt) => {
     assert.match(prompt, /Copy commands\/results verbatim/);
     return JSON.stringify(report);
