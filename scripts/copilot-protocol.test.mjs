@@ -139,6 +139,13 @@ test("agent completion reports are normalized without accepting quoted requests,
     data.tests[0].result = "PASS: 1 passed, 2 failed";
     assert.equal(structuredAgentEvidence({ ...source, body: JSON.stringify(data) },
       "abcd", ["src/a.test.js"]).report.commands[0].outcome, "failed");
+    const matrix = { commit_sha: "abcd", tests: { path: "src/a.test.js",
+      focused_command: "node --test src/a.test.js", focused_result: "passed: 1/1",
+      full_command: "node --test", full_result: "passed: 2/2", coverage: "Actual boundary/error assertions" },
+      integration_tests: "Not run: no changed external boundary", playwright: "Backend-only, not applicable" };
+    const normalizedMatrix = structuredAgentEvidence({ ...source, body: JSON.stringify(matrix) }, "abcd", ["src/a.test.js"]);
+    assert.deepEqual(normalizedMatrix.report.commands.map((command) => command.details), ["passed: 1/1", "passed: 2/2"]);
+    assert.equal(normalizedMatrix.report.layers.integration, matrix.integration_tests);
   });
   assert.equal(result.comment.id, source.id);
   assert.deepEqual(result.report, report);

@@ -92,16 +92,27 @@ export function structuredAgentEvidence(comment, sha, changedPaths) {
     if (!(error instanceof ResponseError)) throw error;
     return null;
   }
-  if ((data.commit_sha ?? data.head_sha) !== sha || !Array.isArray(data.tests) ||
-      !data.tests.length || data.tests.length > 12) return null;
-  const coverage = data.coverage ?? data.coverage_rationale;
+  if ((data.commit_sha ?? data.head_sha) !== sha) return null;
+  let tests = data.tests;
+  if (tests && !Array.isArray(tests) && typeof tests === "object" &&
+      tests.focused_command && tests.focused_result && tests.full_command && tests.full_result) {
+    tests = [{ path: tests.path, command: tests.focused_command, result: tests.focused_result },
+      { path: tests.path, command: tests.full_command, result: tests.full_result }];
+    if (data.format?.command && data.format?.result) {
+      tests.push({ path: data.tests.path, command: data.format.command, result: data.format.result });
+    }
+  }
+  if (!Array.isArray(tests) || !tests.length || tests.length > 12) return null;
+  const coverage = data.coverage ?? data.coverage_rationale ?? {
+    unit: data.tests?.coverage, integration: data.integration_tests, playwright: data.playwright,
+  };
   const rationale = (value) => typeof value === "string" ? value : value?.evidence ?? value?.reason;
   const layers = { unit: rationale(coverage?.unit), integration: rationale(coverage?.integration),
     playwright: rationale(coverage?.playwright ?? coverage?.browser) };
   if (!Object.values(layers).every((value) => text(value))) return null;
   const testPaths = [];
   const commands = [];
-  for (const test of data.tests) {
+  for (const test of tests) {
     if (!test || !text(test.path, 1000) || !text(test.command, 1000) || !text(test.result)) return null;
     const relative = changedPaths.find((file) => test.path === file || test.path.endsWith(`/${file}`)) ??
       (path(test.path) ? test.path : null);
