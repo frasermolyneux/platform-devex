@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { collectWorkflowRuns, latestPullRequestRuns } from "../.github/actions/approve-copilot-workflow-runs/workflow-runs.mjs";
 import { parseObjectResponse, ResponseError, runReadOnlyAnalysis } from "./copilot-analysis.mjs";
+import { classifySonarFindings, SONAR_POLICY_INSTRUCTIONS, SONAR_POLICY_VERSION, sonarPolicyMarker } from "./sonar-policy.mjs";
 import {
   BOUNDARY_TAG, EVIDENCE_INSTRUCTIONS, EvidenceError, NORMALIZATION_TAG, VERIFICATION_TAG,
   agentEvidenceCandidate, evidenceReport, fingerprint, normalizeAgentEvidence,
@@ -43,7 +44,7 @@ const TESTING_INSTRUCTIONS = [
   "If existing tests already cover the changed behavior, identify the exact tests and explain why additions are unnecessary. Justify each test layer that is not applicable.",
   "Run relevant existing and added tests. In the PR description, record added/updated test paths, commands, pass/fail outcomes and the coverage rationale.",
   "If appropriate coverage cannot be added or executed within the bounded scope, explain the blocker and stop for human guidance; never omit required coverage to meet the size limit.",
-  "Introduce no new SonarCloud findings, including INFO-level analyzer diagnostics in tests. Follow existing analyzer/XML documentation conventions; never suppress findings or weaken configuration to meet this requirement.",
+  SONAR_POLICY_INSTRUCTIONS,
   EVIDENCE_INSTRUCTIONS,
 ];
 
@@ -109,7 +110,7 @@ export function diffRisk(pr, files) {
   if (pr.changed_files > 8 || pr.additions + pr.deletions > 250 || files.length !== pr.changed_files) {
     return "PR exceeds the eight-file or 250-line change limit";
   }
-  const sensitive = /(^|\/)(\.github\/|CODEOWNERS$|AGENTS\.md$|Dockerfile[^/]*$|\.editorconfig$|[^/]*\.ruleset$|sonar-project\.properties$|Directory\.Build\.(props|targets)$|\.terraform|terraform\/|infra\/)/i;
+  const sensitive = /(^|\/)(\.github\/|CODEOWNERS$|AGENTS\.md$|Dockerfile[^/]*$|\.editorconfig$|[^/]*\.ruleset$|sonar-project\.properties$|scripts\/sonar-policy\.mjs$|Directory\.Build\.(props|targets)$|\.terraform|terraform\/|infra\/)/i;
   const unsafe = files.find((file) => [file.filename, file.previous_filename].some((path) => path && sensitive.test(path)));
   return unsafe ? `PR changes a gated path: ${unsafe.filename}` : null;
 }
@@ -306,13 +307,17 @@ async function sonarcloudAlerts(repo, branch, token, pullRequest) {
       const prefix = `${projectKey}:`;
       if (issue.project !== projectKey || !(pullRequest ? ["CODE_SMELL", "BUG", "VULNERABILITY"].includes(issue.type) : issue.type === "CODE_SMELL") ||
           !/^[A-Za-z0-9_-]+$/.test(issue.key ?? "") || !issue.component?.startsWith(prefix) ||
-          !issue.component.slice(prefix.length) || typeof issue.rule !== "string") {
+          !issue.component.slice(prefix.length) || typeof issue.rule !== "string" ||
+          (issue.impacts !== undefined && !Array.isArray(issue.impacts))) {
         throw new Error(`${repo}: malformed SonarCloud issue on page ${page}`);
       }
       alerts.push({
         id: `sonarcloud:${issue.key}`,
         source: "sonarcloud",
         rule: issue.rule,
+        type: issue.type,
+        sonarSeverity: issue.severity,
+        impacts: issue.impacts,
         path: issue.component.slice(prefix.length),
         line: issue.textRange?.startLine ?? issue.line,
         severity: (issue.impacts?.find((impact) => impact.softwareQuality === "MAINTAINABILITY")?.severity ??
@@ -351,6 +356,7 @@ export async function scanAlerts(api, repo, enabledSources, sonarToken) {
   const alerts = [];
   const counts = {};
   let sonarAnalysisDate;
+  let sonarRef;
   let sonarIsCurrent = true;
   let unavailable = 0;
   let invalid = 0;
@@ -406,6 +412,7 @@ export async function scanAlerts(api, repo, enabledSources, sonarToken) {
   if (enabledSources.includes("sonarcloud")) {
     const branch = (await api.request(`/repos/${repo}`)).default_branch;
     const head = await api.request(`/repos/${repo}/commits/${encodeURIComponent(branch)}`);
+    sonarRef = head.sha;
     const committedAt = Date.parse(head.commit?.committer?.date);
     if (!Number.isFinite(committedAt)) throw new Error(`${repo}: invalid default-branch commit timestamp`);
     const sonar = await sonarcloudAlerts(repo, branch, sonarToken);
@@ -415,7 +422,7 @@ export async function scanAlerts(api, repo, enabledSources, sonarToken) {
     alerts.push(...sonar.alerts);
   }
   if (unavailable === enabledSources.length) throw new Error(`${repo}: no configured alert source is available`);
-  return { alerts, counts, sonarAnalysisDate, sonarIsCurrent, complete: unavailable === 0 && invalid === 0 };
+  return { alerts, counts, sonarRef, sonarAnalysisDate, sonarIsCurrent, complete: unavailable === 0 && invalid === 0 };
 }
 
 export async function addContext(api, repo, alerts) {
@@ -532,21 +539,30 @@ async function findPullRequest(api, repo, issueNumber) {
   return null;
 }
 
-async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dryRun, appLogin, sonarVerified) {
+async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dryRun, appLogin, sonarPolicy) {
   const marker = `${READY_MARKER}${sha} -->`;
-  if ((await comments(api, repo, issue.number)).some((item) =>
-    item.user?.login === appLogin && item.body?.startsWith(marker))) return;
+  const previous = (await comments(api, repo, issue.number)).find((item) =>
+    item.user?.login === appLogin && item.body?.startsWith(marker));
+  const body = [
+    marker, `PR #${pr.number} is ready for **human** review and merge.`,
+    ...(sonarPolicy ? [
+      sonarPolicyMarker(sha),
+      `SonarCloud's complete current-head PR analysis: ${sonarPolicy.raw.length} raw new findings, zero blocking, ${sonarPolicy.advisory.length} advisory under policy ${sonarPolicy.version}. Advisory findings remain open, not fixed.`,
+      ...sonarPolicy.advisory.slice(0, MAX_CONTEXT).map((finding) => `- Advisory ${finding.id} ${clean(finding.rule)} at ${clean(finding.repositoryPath)}:${finding.line ?? "?"} (verified test project ${clean(finding.testProject)}).`),
+      ...(sonarPolicy.advisory.length > MAX_CONTEXT ? [
+        `Showing ${MAX_CONTEXT} of ${sonarPolicy.advisory.length} advisories; full findings: https://sonarcloud.io/project/issues?id=${encodeURIComponent(repo.replace("/", "_"))}&pullRequest=${pr.number}`,
+      ] : []),
+    ] : []),
+    `Findings: ${batch.alertIds.join(", ")}`,
+    `Changed files: ${files.map((file) => clean(file.filename)).join(", ")}`,
+    `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success" && !["copilot", COPILOT_REVIEW_CHECK].includes(run.name)).map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
+    "Copilot reviewed the latest commit; no unresolved inline findings remain. Before merging, verify the PR's added/updated tests or exact existing-coverage justification, applicable unit/integration/Playwright coverage, commands and results. Green checks alone do not prove adequate coverage.",
+  ].join("\n");
+  if (previous?.body === body) return;
   await note(`${repo}#${issue.number}: PR #${pr.number} passed checks and has a fresh Copilot review; awaiting HUMAN review and merge.`);
-  if (!dryRun) await api.request(`/repos/${repo}/issues/${issue.number}/comments`, {
-    method: "POST",
-    body: { body: [
-      marker, `PR #${pr.number} is ready for **human** review and merge.`,
-      ...(sonarVerified ? [`<!-- platform-devex-ci-sonar-zero-v1:${sha} -->\nSonarCloud's complete current-head PR analysis has zero new findings, including INFO diagnostics.`] : []),
-      `Findings: ${batch.alertIds.join(", ")}`,
-      `Changed files: ${files.map((file) => clean(file.filename)).join(", ")}`,
-      `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success" && !["copilot", COPILOT_REVIEW_CHECK].includes(run.name)).map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
-      "Copilot reviewed the latest commit; no unresolved inline findings remain. Before merging, verify the PR's added/updated tests or exact existing-coverage justification, applicable unit/integration/Playwright coverage, commands and results. Green checks alone do not prove adequate coverage.",
-    ].join("\n") },
+  if (!dryRun) await api.request(previous
+    ? `/repos/${repo}/issues/comments/${previous.id}` : `/repos/${repo}/issues/${issue.number}/comments`, {
+    method: previous ? "PATCH" : "POST", body: { body },
   });
 }
 
@@ -967,14 +983,20 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     return;
   }
   const sha = pr.head.sha;
+  const migrationReason = `the earlier handoff was not verified under the current versioned Sonar policy (${SONAR_POLICY_VERSION})`;
+  const previouslyHandedOff = existing.some((comment) => comment.user?.login === appLogin &&
+    (comment.body?.startsWith(`${READY_MARKER}${sha} -->`) ||
+      (comment.body?.startsWith("<!-- platform-devex-ci-handoff-withdrawn -->") &&
+       comment.body.includes(migrationReason) && comment.body.includes(`${READY_MARKER}${sha} -->`) &&
+       Number.isFinite(Date.parse(comment.updated_at)) && !timedOut(comment.updated_at))));
   if (existing.some((comment) => comment.user?.login === appLogin &&
       comment.body?.startsWith(READY_MARKER) && !comment.body.startsWith(`${READY_MARKER}${sha} -->`))) {
     await withdrawHandoffs(app, repo, issue, appLogin, "the PR head changed and must be verified again", dryRun);
   }
   if (enabledSources.includes("sonarcloud") && existing.some((comment) =>
     comment.user?.login === appLogin && comment.body?.startsWith(READY_MARKER) &&
-    !comment.body.includes(`<!-- platform-devex-ci-sonar-zero-v1:${sha} -->`))) {
-    await withdrawHandoffs(app, repo, issue, appLogin, "the earlier handoff was not verified under the zero-new-Sonar-finding policy", dryRun);
+    !comment.body.includes(sonarPolicyMarker(sha)))) {
+    await withdrawHandoffs(app, repo, issue, appLogin, migrationReason, dryRun);
   }
   const prComments = await comments(app, repo, pr.number);
   if (prComments.some((comment) => comment.user?.login === human.login &&
@@ -982,8 +1004,7 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     await escalate(app, repo, issue, `PR #${pr.number} exhausted failed-check fixes`, dryRun, appLogin);
     return;
   }
-  if (timedOut(pr.updated_at) && !existing.some((comment) =>
-    comment.user?.login === appLogin && comment.body?.includes(`${READY_MARKER}${pr.head.sha} -->`))) {
+  if (timedOut(pr.updated_at) && !previouslyHandedOff) {
     await escalate(app, repo, issue, `PR #${pr.number} has not progressed for 48 hours`, dryRun, appLogin);
     return;
   }
@@ -1039,17 +1060,21 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     }
     return;
   }
+  let sonarPolicy;
   if (enabledSources.includes("sonarcloud")) {
     let newFindings;
     try {
-      newFindings = await sonarPullRequestFindings(repo, pr, sonarToken);
+      sonarPolicy = await classifySonarFindings(app, repo, sha,
+        await sonarPullRequestFindings(repo, pr, sonarToken), pr.base.sha ?? null);
+      newFindings = sonarPolicy.blocking;
+      await note(`${repo}#${issue.number}: Sonar policy ${sonarPolicy.version}: ${sonarPolicy.raw.length} raw, ${newFindings.length} blocking, ${sonarPolicy.advisory.length} advisory (not fixed).`);
     } catch (error) {
       await withdrawHandoffs(app, repo, issue, appLogin, "current complete SonarCloud PR validation is unavailable", dryRun);
       throw error;
     }
     if (newFindings.length) {
       if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
-      await withdrawHandoffs(app, repo, issue, appLogin, `${newFindings.length} new SonarCloud findings remain, including INFO diagnostics`, dryRun);
+      await withdrawHandoffs(app, repo, issue, appLogin, `${newFindings.length} blocking new SonarCloud findings remain`, dryRun);
       if (newFindings.length > MAX_CONTEXT) {
         if (prComments.some((comment) => comment.user?.login === human.login &&
             comment.body?.includes(`${FIX_MARKER}${sha} -->`))) {
@@ -1060,7 +1085,7 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
         return;
       }
       await requestCodeRepair(app, human, repo, issue, pr, prComments, [
-        "Zero new SonarCloud findings is required, including INFO diagnostics. Fix only introduced findings while retaining all needed coverage; narrow/escalate rather than exceed the scope cap.",
+        "Zero blocking new SonarCloud findings is required. Fix only blocking introduced findings while retaining all needed coverage; narrow/escalate rather than exceed the scope cap. Approved advisory findings do not consume repair attempts.",
         ...newFindings.map((finding) => `- ${finding.id} ${clean(finding.rule)} at ${clean(finding.path)}:${finding.line ?? "?"}: ${clean(finding.summary)}`),
       ], dryRun, appLogin);
       return;
@@ -1192,6 +1217,8 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
   }
   const context = {
     repo, sha, description: pr.body, task: issue.body, reportedEvidence: evidence.report,
+    sonarPolicy: sonarPolicy && { version: sonarPolicy.version, raw: sonarPolicy.raw.length,
+      blocking: sonarPolicy.blocking.length, advisory: sonarPolicy.advisory.length },
     sourceEvidenceText: evidence.comment.body,
     ownerAuthorizations: existing.filter((comment) => comment.user?.login === human.login)
       .map((comment) => ({ id: comment.id, body: comment.body })),
@@ -1296,8 +1323,10 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
   }
   if (enabledSources.includes("sonarcloud")) {
     try {
-      if ((await sonarPullRequestFindings(repo, latest, sonarToken)).length) {
-        await withdrawHandoffs(app, repo, issue, appLogin, "new SonarCloud findings appeared before final handoff", dryRun);
+      sonarPolicy = await classifySonarFindings(app, repo, sha,
+        await sonarPullRequestFindings(repo, latest, sonarToken), latest.base.sha ?? null);
+      if (sonarPolicy.blocking.length) {
+        await withdrawHandoffs(app, repo, issue, appLogin, "blocking new SonarCloud findings appeared before final handoff", dryRun);
         return;
       }
     } catch (error) {
@@ -1307,7 +1336,7 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
   }
   if (!await currentSnapshot(app, repo, issue, latest, human.login)) return;
   await readyComment(app, repo, issue, batch, latest, sha, files, finalChecks, dryRun, appLogin,
-    enabledSources.includes("sonarcloud"));
+    sonarPolicy);
 }
 
 export async function analyze(alerts, createClient, testing = {}) {
@@ -1372,7 +1401,7 @@ async function intake(app, human, repo, dryRun, appLogin, enabledSources, sonarT
       }
     }
   }
-  const { alerts, counts, complete, sonarIsCurrent } = await scanAlerts(app, repo, enabledSources, sonarToken);
+  const { alerts, counts, complete, sonarIsCurrent, sonarRef } = await scanAlerts(app, repo, enabledSources, sonarToken);
   if (!complete) {
     await note(`${repo}: an alert source is unavailable or contains malformed findings; intake paused.`);
     return;
@@ -1381,9 +1410,13 @@ async function intake(app, human, repo, dryRun, appLogin, enabledSources, sonarT
     await note(`${repo}: SonarCloud has not analyzed the latest default-branch commit; intake paused.`);
     return;
   }
+  const sonarPolicy = await classifySonarFindings(app, repo, sonarRef,
+    alerts.filter((alert) => alert.source === "sonarcloud"));
+  const advisoryIds = new Set(sonarPolicy.advisory.map((finding) => finding.id));
+  if (sonarPolicy.raw.length) await note(`${repo}: Sonar policy ${sonarPolicy.version}: ${sonarPolicy.raw.length} raw code smells, ${sonarPolicy.blocking.length} blocking, ${advisoryIds.size} advisory (not fixed); raw baseline counts retained.`);
   const recent = closed.filter(({ issue }) => Date.now() - Date.parse(issue.closed_at) < MAX_AGE_MS);
   const recentIds = new Set(recent.flatMap(({ batch }) => batch.alertIds));
-  const eligible = selectCandidates(alerts, recentIds);
+  const eligible = selectCandidates(alerts.filter((alert) => !advisoryIds.has(alert.id)), recentIds);
   if (!eligible.length) {
     await note(`${repo}: no eligible security/quality alerts.`);
     return;

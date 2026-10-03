@@ -88,20 +88,42 @@ waits for the selected findings to disappear on the default branch and, for Sona
 findings, for an analysis newer than the merge. It comments with before/after counts and the
 net change (which may reflect unrelated new findings) before closing the issue; a passing
 PR check alone never counts as a resolved finding.
+Intake excludes only advisory findings under the shared `test-style-advisory-v1` policy;
+raw scanner counts and selected finding IDs remain unchanged for post-merge verification.
 The improvement reconciler checks that its trusted, same-repository Copilot PR has a small,
 non-sensitive diff, updates its branch if behind, and marks a draft ready for review. This
 triggers repositories whose validation workflows skip drafts but run on `ready_for_review`.
 Skipped-only checks and Copilot's own agent/review jobs do not count as passing validation.
-When SonarCloud is enabled, human handoff requires **zero new PR findings**, including INFO
-analyzer diagnostics in added tests, not merely a passing quality gate. PR analysis must be
-current (matching the exact PR head SHA), complete and unchanged throughout paging;
-introduced findings use the existing bounded repair budget or escalate.
+When SonarCloud is enabled, human handoff requires **zero blocking new PR findings**,
+not merely a passing quality gate. The shared policy in `scripts/sonar-policy.mjs` makes
+only INFO-level CODE_SMELL findings from the exact `external_roslyn` rules `CS1591`,
+`IDE0058`, `IDE0022`, `IDE0046`, `IDE0300` and `IDE0305` advisory in verified test-project C# source.
+Production files, other rules (including CA1305, CA1861 and xUnit2032), non-INFO findings,
+security/reliability impacts and uncertain classification remain blocking. Test classification
+requires unambiguous regular source files in an existing SDK-style C# project, literal
+Microsoft.NET.Test.Sdk plus supported xUnit/NUnit/MSTest framework and adapter references,
+and safe default compilation in both the head and trusted base. Custom/conditional test wiring,
+imports, compile overrides, missing metadata and ambiguous project ownership are not waived.
+No analyzer rules or imports are disabled. Advisories remain visible, do not initiate autonomous
+batches or consume repair attempts, and are explicitly reported as open, not fixed.
+Handoffs record the policy version, exact head, raw/blocking/advisory counts and advisory
+details (bounded excerpts plus a full-scan link for large sets).
+PR analysis must be current (matching the exact PR head SHA), complete and unchanged throughout paging;
+blocking introduced findings use the existing bounded repair budget or escalate.
 Never suppress diagnostics or drop required tests to fit the cap; narrow the batch instead.
+Agents must run locally available existing CI-equivalent analyzer checks before reporting
+completion; passing build/format checks alone may miss diagnostics from CI analysis.
+Hosted-only checks must be identified separately, never invented as locally executed commands
+or reproduced by adding credentials/infrastructure; the controller verifies hosted results.
+Safe existing formatting
+fixes stay within the same scope cap; no new testing/analyzer infrastructure is authorized.
 Analyzer configuration and shared MSBuild props/targets are deterministically gated before
 CI approval as well as during improvement reconciliation.
 An earlier handoff is explicitly withdrawn when its head changes, its batch escalates, or
-new findings/unavailable quality validation invalidate it. Handoffs made before the strict
-Sonar policy are withdrawn even while replacement validation is pending.
+blocking findings/unavailable quality validation invalidate it. Handoffs made before the
+current versioned Sonar policy are withdrawn even while replacement validation is pending.
+An owned policy-migration withdrawal grants at most 48 hours to revalidate an otherwise
+stale, already-ready PR; it never resets code-repair or review budgets.
 Cancelled checks are handled as orchestration failures, not requests for code changes: the
 controller retries only the latest current-head workflow event that was already released by
 the trusted App, using that repository's App token. Retries are capped at two per run/head,

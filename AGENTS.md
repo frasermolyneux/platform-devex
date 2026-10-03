@@ -120,8 +120,13 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   Diversify sampled rules and record before/after counts; wait for a post-merge Sonar analysis
   before resolving SonarCloud findings. Keep `SONAR_TOKEN` out of the SDK environment. Missing
   scanners, absent review, incomplete checks and third-party PRs are never safe; never auto-merge.
-  Before human handoff, require zero new SonarCloud PR findings including INFO diagnostics,
-  with complete current analysis; a green quality gate alone is insufficient. Use bounded
+  Before human handoff, require zero blocking new SonarCloud PR findings under the shared
+  `test-style-advisory-v1` policy in `scripts/sonar-policy.mjs`; a green quality gate alone is
+  insufficient. Only its six exact INFO Roslyn style/documentation CODE_SMELL rules in
+  verified existing test-project source are advisory. Production code, other rules,
+  security/reliability and unknown classification still block. Preserve raw counts and
+  post-merge target-ID verification; advisory never means fixed. Version handoffs and report
+  raw/blocking/advisory counts. Never let an improvement PR expand the policy. Use bounded
   repairs or escalate/narrow, never suppress analyzers or drop required coverage to meet caps.
   Withdraw previous handoffs when the head, escalation or quality state invalidates them.
 - Keep the shared continuous-improvement test requirements consistent in SDK intake, generated
@@ -130,6 +135,9 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   tests for affected UI journeys when already used; backend-only changes do not need browser
   tests. If existing coverage suffices, name the exact tests and explain why no additions are
   needed. PR descriptions must identify test changes, applicable layers, commands and results.
+  Run locally available existing CI-equivalent analyzer checks before the final report;
+  passing build/format checks alone may not cover CI diagnostics. Identify hosted-only checks
+  separately from executed local commands; never invent execution or add credentials/infrastructure.
   Reuse existing tooling; never introduce unrelated test setup or omit coverage to meet scope
   limits. Test files may be in separate directories but count toward eight files/250 changed
   lines. Testing blockers require human guidance, and human review assesses coverage adequacy.

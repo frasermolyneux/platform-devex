@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { EVIDENCE_TAG, marker, publishEvidenceBody } from "./review-lifecycle.mjs";
+import { sonarPolicyMarker, SONAR_POLICY_VERSION } from "./sonar-policy.mjs";
 import {
   addContext,
   analyze,
@@ -32,6 +33,9 @@ function assertTestingInstructions(text) {
   assert.match(text, /stop for human guidance; never omit required coverage to meet the size limit/);
   assert.match(text, /targeted tests may live in separate test directories/);
   assert.match(text, /entire PR, including tests, within eight files and 250 added\/deleted lines/);
+  assert.match(text, /require zero blocking new findings/);
+  assert.match(text, /existing CI-equivalent analyzer checks/);
+  assert.match(text, /Advisory findings remain visible/);
 }
 
 test("improvement issues and agent assignments require appropriate new coverage within the same bounded scope", () => {
@@ -245,6 +249,8 @@ test("SonarCloud scan verifies its project and reads every page before reporting
     assert.equal(scan.alerts.length, 501);
     assert.deepEqual(scan.alerts[0], {
       id: "sonarcloud:Key0", source: "sonarcloud", rule: "csharpsquid:S1234",
+      type: "CODE_SMELL", sonarSeverity: "MAJOR",
+      impacts: [{ softwareQuality: "MAINTAINABILITY", severity: "MEDIUM" }],
       path: "src/a.cs", line: 7, severity: "medium", summary: "Improve this source",
       url: "https://sonarcloud.io/project/issues?id=owner_repo&issues=Key0",
     });
@@ -807,7 +813,7 @@ function mockImprovementPr() {
       mergeable_state: "blocked", changed_files: 1, additions: 2, deletions: 1,
       user: { login: "Copilot" },
       head: { sha: "abcd", ref: "copilot/fix", repo: { full_name: "owner/repo" } },
-      base: { ref: "main", repo: { full_name: "owner/repo" } },
+      base: { ref: "main", sha: "base", repo: { full_name: "owner/repo" } },
     },
     checks: { total_count: 1, check_runs: [{ name: "build", status: "completed", conclusion: "skipped" }] },
     status: { state: "pending", statuses: [] },
@@ -830,6 +836,8 @@ function mockImprovementPr() {
     rollupState: "SUCCESS",
     rollupPartial: false,
     sonarFindings: [],
+    tree: [{ type: "blob", mode: "100644", path: "package.json" }],
+    sourceFiles: {},
     sonarAnalysisDate: now,
     writes: [],
   };
@@ -919,7 +927,9 @@ function mockImprovementPr() {
           user: { login: "app[bot]" }, body: body.body });
       }
       if (path.startsWith("/repos/owner/repo/issues/comments/") && init.method === "PATCH") {
-        state.issueComments.find((comment) => path.endsWith(`/${comment.id}`)).body = body.body;
+        const comment = state.issueComments.find((comment) => path.endsWith(`/${comment.id}`));
+        comment.body = body.body;
+        comment.updated_at = new Date().toISOString();
       }
       if (path === "/repos/owner/repo/issues/8/comments") {
         state.prComments.push({ id: 200 + state.writes.length, created_at: now,
@@ -936,9 +946,14 @@ function mockImprovementPr() {
       }
       return Response.json({});
     }
-    if (path.startsWith("/repos/owner/repo/contents/")) return Response.json({
-      encoding: "base64", content: Buffer.from("discovered source and focused assertions").toString("base64"),
-    });
+    if (path.startsWith("/repos/owner/repo/contents/")) {
+      const request = new URL(url);
+      const filename = decodeURIComponent(request.pathname.split("/contents/")[1]);
+      const text = state.sourceFiles[`${request.searchParams.get("ref")}:${filename}`] ??
+        state.sourceFiles[filename] ?? "discovered source and focused assertions";
+      return Response.json({ type: "file", encoding: "base64", size: Buffer.byteLength(text),
+        content: Buffer.from(text).toString("base64") });
+    }
     const replies = {
       "/user": { login: "owner" },
       "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [state.issue],
@@ -955,12 +970,18 @@ function mockImprovementPr() {
       [`/repos/owner/repo/commits/${state.pr.head.sha}/check-runs?per_page=100`]: state.checks,
       [`/repos/owner/repo/commits/${state.pr.head.sha}/status`]: state.status,
       [`/repos/owner/repo/commits/${state.pr.head.sha}`]: {
+        sha: state.pr.head.sha,
         commit: { committer: { date: new Date(Date.parse(now) - 60_000).toISOString() } },
       },
+      "/repos/owner/repo/commits/main": { sha: state.pr.head.sha,
+        commit: { committer: { date: new Date(Date.parse(now) - 60_000).toISOString() } } },
+      "/repos/owner/repo/code-scanning/alerts?state=open&per_page=100": [],
+      "/repos/owner/repo/dependabot/alerts?state=open&per_page=100": [],
       "/repos/owner/repo/pulls/8/reviews?per_page=100": state.reviews.map((review, index) => ({ id: index + 1, ...review })),
       [`/repos/owner/repo/git/trees/${state.pr.head.sha}?recursive=1`]: {
-        truncated: false, tree: [{ type: "blob", path: "package.json" }],
+        truncated: false, tree: state.tree,
       },
+      "/repos/owner/repo/git/trees/base?recursive=1": { truncated: false, tree: state.baseTree ?? state.tree },
       "/repos/owner/repo/rules/branches/main": state.rules,
       [`/repos/owner/repo/actions/runs?event=pull_request&head_sha=${state.pr.head.sha}&per_page=100`]: {
         total_count: state.workflowRuns.length, workflow_runs: state.workflowRuns,
@@ -1525,15 +1546,14 @@ test("a PR already handed off does not escalate just because a human has not yet
   try {
     state.pr.draft = false;
     state.pr.mergeable_state = "clean";
-    state.pr.updated_at = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     state.checks.check_runs[0].conclusion = "success";
     state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
       commit_id: "abcd", state: "COMMENTED" });
-    state.issueComments.push({ user: { login: "app[bot]" },
-      body: "<!-- platform-devex-ci-ready:abcd -->\n<!-- platform-devex-ci-sonar-zero-v1:abcd -->" });
     await run();
-    assert.equal(state.writes.length, 1);
-    assert.doesNotMatch(state.writes[0].body.body, /needs human attention/);
+    state.writes.length = 0;
+    state.pr.updated_at = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    await run();
+    assert.equal(state.writes.length, 0);
   } finally {
     restore();
   }
@@ -1776,7 +1796,7 @@ test("a green quality gate with one new INFO finding cannot reach review or huma
     await run();
     assert.equal(state.verificationCalls, 0);
     assert.equal(state.writes.length, 1);
-    assert.match(state.writes[0].body.body, /Zero new SonarCloud findings.*INFO/);
+    assert.match(state.writes[0].body.body, /Zero blocking new SonarCloud findings/);
     assert.match(state.writes[0].body.body, /external_roslyn:IDE0058/);
     assert.equal(state.writes.some((write) => write.body?.body?.includes("platform-devex-ci-ready:")), false);
   } finally { restore(); }
@@ -1836,7 +1856,7 @@ test("quality dry-runs remain read-only even with findings and an existing hando
   } finally { restore(); }
 });
 
-test("legacy handoffs are withdrawn before waiting for pending checks under the stricter quality policy", async () => {
+test("legacy handoffs are withdrawn before waiting for pending checks under the versioned quality policy", async () => {
   const { state, run, restore } = mockImprovementPr();
   try {
     greenReviewed(state);
@@ -1846,7 +1866,7 @@ test("legacy handoffs are withdrawn before waiting for pending checks under the 
       body: "<!-- platform-devex-ci-ready:abcd -->\nPreviously ready" });
     await run();
     assert.match(state.issueComments[0].body, /^<!-- platform-devex-ci-handoff-withdrawn -->/);
-    assert.match(state.issueComments[0].body, /zero-new-Sonar-finding policy/);
+    assert.match(state.issueComments[0].body, /current versioned Sonar policy/);
     assert.equal(state.writes.length, 1);
     assert.equal(state.sonarMetadataCalls, undefined);
   } finally { restore(); }
@@ -1865,7 +1885,7 @@ test("missing exact Sonar commit metadata fails closed instead of trusting a fre
 
 test("analyzer/build suppression configurations are gated even when the diff fits the size budget", () => {
   for (const filename of [".editorconfig", "src/settings.ruleset", "sonar-project.properties",
-    "Directory.Build.props", "src/Directory.Build.targets"]) {
+    "Directory.Build.props", "src/Directory.Build.targets", "scripts/sonar-policy.mjs"]) {
     assert.match(diffRisk({ changed_files: 1, additions: 1, deletions: 1 }, [{ filename }]), /gated path/);
   }
 });
@@ -1933,11 +1953,203 @@ test("quality validation disappearing during SDK verification withdraws a previo
   try {
     greenReviewed(state);
     state.issueComments.push({ id: 77, user: { login: "app[bot]" },
-      body: "<!-- platform-devex-ci-ready:abcd -->\n<!-- platform-devex-ci-sonar-zero-v1:abcd -->" });
+      body: `<!-- platform-devex-ci-ready:abcd -->\n${sonarPolicyMarker("abcd")}` });
     state.onVerify = () => { state.sonarCommit = null; };
     await assert.rejects(run(), /current SonarCloud PR analysis is unavailable/);
     assert.equal(state.verificationCalls, 1);
     assert.match(state.issueComments[0].body, /^<!-- platform-devex-ci-handoff-withdrawn -->/);
     assert.match(state.issueComments[0].body, /final complete SonarCloud PR validation is unavailable/);
+  } finally { restore(); }
+});
+
+const verifiedProjectXml = '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" /><PackageReference Include="xunit.runner.visualstudio" /></ItemGroup></Project>';
+
+function verifiedStyleFinding(state, key = "new-info") {
+  const project = "src/Checks/Checks.csproj";
+  const path = "src/Checks/Regression.cs";
+  state.tree.push(...[project, path].map((path) => ({ type: "blob", mode: "100644", path })));
+  state.sourceFiles[project] = verifiedProjectXml;
+  state.sourceFiles[path] = "public class Regression { }";
+  return { ...sonarInfo(), key, component: `owner_repo:${path}` };
+}
+
+test("verified style advisories reach versioned human handoff without consuming code repairs", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.sonarFindings = [verifiedStyleFinding(state)];
+    await run();
+    const ready = state.issueComments.find((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:"));
+    assert.ok(ready);
+    assert.match(ready.body, new RegExp(SONAR_POLICY_VERSION));
+    assert.match(ready.body, /1 raw new findings, zero blocking, 1 advisory/);
+    assert.match(ready.body, /Advisory findings remain open, not fixed/);
+    assert.match(ready.body, /external_roslyn:IDE0058.*src\/Checks\/Regression.cs/);
+    assert.equal(state.verificationCalls, 1);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+    state.writes.length = 0;
+    await run("true");
+    assert.deepEqual(state.writes, []);
+  } finally { restore(); }
+});
+
+test("mixed findings repair only blockers and valuable INFO stays blocking even in verified test source", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    const advisory = verifiedStyleFinding(state);
+    state.sonarFindings = [advisory, { ...advisory, key: "valuable-info",
+      rule: "external_roslyn:CA1305", message: "Culture-sensitive parsing" }];
+    await run();
+    const request = state.writes.find((write) => write.path.endsWith("/issues/8/comments"));
+    assert.match(request.body.body, /sonarcloud:valuable-info.*CA1305/);
+    assert.doesNotMatch(request.body.body, /sonarcloud:new-info/);
+    assert.equal(state.verificationCalls, 0);
+    assert.equal(state.issueComments.some((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:")), false);
+  } finally { restore(); }
+});
+
+test("unverified or PR-created test wiring cannot waive style diagnostics", async () => {
+  for (const unknown of ["fake-project", "new-project", "no-base"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      greenReviewed(state);
+      state.sonarFindings = [verifiedStyleFinding(state)];
+      if (unknown === "fake-project") state.sourceFiles["src/Checks/Checks.csproj"] = "<Project />";
+      if (unknown === "new-project") state.baseTree = [];
+      if (unknown === "no-base") delete state.pr.base.sha;
+      await run();
+      assert.equal(state.verificationCalls, 0, unknown);
+      assert.ok(state.writes.some((write) => write.body?.body?.includes("sonarcloud:new-info")), unknown);
+      assert.equal(state.issueComments.some((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:")), false);
+    } finally { restore(); }
+  }
+});
+
+test("advisory classification never bypasses failed checks or unresolved review conversations", async () => {
+  for (const blocker of ["checks", "thread"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      greenReviewed(state);
+      state.sonarFindings = [verifiedStyleFinding(state)];
+      if (blocker === "checks") state.checks.check_runs[0].conclusion = "failure";
+      else addThread(state, "style-is-not-proof");
+      await run();
+      assert.equal(state.issueComments.some((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:")), false);
+      assert.equal(state.threads.some((thread) => thread.isResolved), false);
+    } finally { restore(); }
+  }
+});
+
+test("a production/valuable finding appearing at final revalidation still prevents advisory handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    const advisory = verifiedStyleFinding(state);
+    state.sonarFindings = [advisory];
+    state.onVerify = () => state.sonarFindings.push({ ...advisory, key: "valuable",
+      rule: "external_roslyn:CA1305", message: "Culture-sensitive parsing" });
+    await run();
+    assert.equal(state.verificationCalls, 1);
+    assert.equal(state.issueComments.some((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:")), false);
+  } finally { restore(); }
+});
+
+test("large advisory sets report full counts and a bounded excerpt; updates refresh the owned handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    const advisory = verifiedStyleFinding(state);
+    state.sonarFindings = Array.from({ length: 17 }, (_, n) => ({ ...advisory, key: `advisory-${n}` }));
+    await run();
+    const ready = state.issueComments.find((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:"));
+    assert.match(ready.body, /17 raw new findings, zero blocking, 17 advisory/);
+    assert.match(ready.body, /Showing 12 of 17 advisories; full findings:/);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+    state.sonarFindings.pop();
+    state.writes.length = 0;
+    await run();
+    assert.match(ready.body, /16 raw new findings, zero blocking, 16 advisory/);
+    assert.ok(state.writes.some((write) => write.method === "PATCH" && write.path.endsWith(`/comments/${ready.id}`)));
+    assert.equal(state.issueComments.filter((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:")).length, 1);
+  } finally { restore(); }
+});
+
+test("a merged selected advisory finding must actually disappear, never count as fixed by reclassification", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    state.sonarFindings = [verifiedStyleFinding(state)];
+    state.issue.body = '<!-- platform-devex-ci-batch-v1:{"alertIds":["sonarcloud:new-info"],"baseline":{"sonarcloud":1}} -->';
+    state.pr.state = "closed";
+    state.pr.merged_at = new Date(Date.now() - 30_000).toISOString();
+    await run();
+    assert.deepEqual(state.writes, []);
+    assert.equal(state.issue.state, "open");
+  } finally { restore(); }
+});
+
+test("intake does not select advisory-only findings and retains their raw scanner count", async () => {
+  const previousFetch = globalThis.fetch;
+  const writes = [];
+  const content = verifiedProjectXml;
+  globalThis.fetch = async (url, init) => {
+    const request = new URL(url);
+    if (request.hostname === "sonarcloud.io") {
+      if (request.pathname === "/api/components/show") return Response.json({ component: {
+        key: "owner_repo", organization: "owner", qualifier: "TRK", analysisDate: new Date().toISOString(),
+      } });
+      return Response.json({ total: 1, paging: { pageIndex: 1, pageSize: 500 },
+        issues: [{ ...sonarInfo(), component: "owner_repo:Checks/Regression.cs" }] });
+    }
+    if (init.method !== "GET") writes.push(url);
+    const path = request.pathname + request.search;
+    if (path.includes("/contents/")) return Response.json({ type: "file", encoding: "base64",
+      size: Buffer.byteLength(content), content: Buffer.from(content).toString("base64") });
+    const replies = {
+      "/user": { login: "owner" },
+      "/repos/owner/repo": { default_branch: "main" },
+      "/repos/owner/repo/issues?state=open&labels=platform-devex-ci&per_page=100": [],
+      "/repos/owner/repo/issues?state=closed&labels=platform-devex-ci&per_page=100": [],
+      "/repos/owner/repo/pulls?state=open&per_page=100": [],
+      "/repos/owner/repo/commits/main": { sha: "abcd", commit: { committer: {
+        date: new Date(Date.now() - 60_000).toISOString(),
+      } } },
+      "/repos/owner/repo/git/trees/abcd?recursive=1": { truncated: false, tree: [
+        { type: "blob", mode: "100644", path: "src/Checks/Checks.csproj" },
+        { type: "blob", mode: "100644", path: "src/Checks/Regression.cs" },
+      ] },
+    };
+    assert.ok(path in replies, `unexpected intake request ${path}`);
+    return Response.json(replies[path]);
+  };
+  try {
+    const api = { request: async (path) => (await fetch(`https://api.github.com${path}`, { method: "GET" })).json() };
+    const scan = await scanAlerts(api, "owner/repo", ["sonarcloud"]);
+    assert.equal(scan.counts.sonarcloud, 1);
+    assert.equal(scan.alerts.length, 1);
+    await main({ CI_MODE: "intake", CI_REPOSITORIES: "repo", CI_REPOSITORY: "repo",
+      CI_SCAN_SOURCES: "sonarcloud", GITHUB_REPOSITORY_OWNER: "owner", CI_DRY_RUN: "false",
+      APP_TOKEN: "app", APP_BOT_LOGIN: "app[bot]", COPILOT_AGENT_PAT: "human" });
+    assert.deepEqual(writes, []);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test("policy migration grants bounded revalidation time, not an immediate stall escalation or budget reset", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.pr.updated_at = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    state.checks.check_runs[0].status = "in_progress";
+    state.checks.check_runs[0].conclusion = null;
+    state.issueComments.push({ id: 77, user: { login: "app[bot]" },
+      body: "<!-- platform-devex-ci-ready:abcd -->\n<!-- platform-devex-ci-sonar-zero-v1:abcd -->" });
+    await run();
+    assert.match(state.issueComments[0].body, /current versioned Sonar policy/);
+    state.writes.length = 0;
+    await run();
+    assert.deepEqual(state.writes, [], "wait for pending validation during the migration grace period");
+    state.issueComments[0].updated_at = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
+    await run();
+    assert.ok(state.writes.some((write) => write.body?.body?.includes("has not progressed for 48 hours")));
   } finally { restore(); }
 });
