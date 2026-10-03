@@ -113,7 +113,9 @@ budgets escalate to a human. It handles failed checks on drafts and non-draft
 failures outside the sweep's check-run criteria (at most three attempts); the separate
 failed-check workflow handles non-draft check-run failures. After real validation passes, it
 requests a review of the latest commit from Copilot using the entitled human PAT, delegates verified
-code/test defects at most twice, and escalates stalled, oversized, CI-changing or unresolved work. If Copilot used an
+code/test defects at most twice, and escalates stalled, oversized, CI-changing or unresolved work.
+Same-head review requests are separately capped at four so repeated verified
+resolve/re-review cycles cannot run indefinitely without code changes. If Copilot used an
 auto-closing reference to the batch issue, the controller changes it to `Refs #...` so the
 issue stays open through post-merge verification. The controller publishes an authenticated,
 current-head test report into a dedicated PR description section, preserving other description

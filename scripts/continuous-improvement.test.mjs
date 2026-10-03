@@ -1870,6 +1870,37 @@ test("analyzer/build suppression configurations are gated even when the diff fit
   }
 });
 
+test("no-code resolve/re-review cycles are bounded independently of code-fix attempts", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.reviews = [];
+    state.issueComments.push(...Array.from({ length: 4 }, (_, index) => ({
+      user: { login: "app[bot]" }, body: `<!-- platform-devex-ci-human-review:abcd:cycle-${index} -->`,
+    })));
+    await run();
+    assert.equal(state.writes.some((write) => write.path.endsWith("/requested_reviewers")), false);
+    assert.match(state.writes.at(-1).body.body, /exhausted 4 verified review requests/);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+  } finally { restore(); }
+});
+
+test("review budgets ignore other authors and heads and still permit the fourth verified request", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.reviews = [];
+    state.issueComments.push(...Array.from({ length: 3 }, (_, index) => ({
+      user: { login: "app[bot]" }, body: `<!-- platform-devex-ci-human-review:abcd:cycle-${index} -->`,
+    })), ...Array.from({ length: 4 }, (_, index) => ({
+      user: { login: "attacker" }, body: `<!-- platform-devex-ci-human-review:abcd:forged-${index} -->`,
+    })), { user: { login: "app[bot]" }, body: "<!-- platform-devex-ci-human-review:old -->" });
+    await run();
+    assert.equal(state.writes.filter((write) => write.path.endsWith("/requested_reviewers")).length, 1);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("needs human attention")), false);
+  } finally { restore(); }
+});
+
 test("an analysis changing between issue pages and final metadata invalidates the whole Sonar snapshot", async () => {
   const { state, run, restore } = mockImprovementPr();
   try {

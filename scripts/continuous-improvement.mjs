@@ -30,6 +30,7 @@ const SCAN_SOURCES = ["code-scanning", "dependabot", "sonarcloud"];
 const MAX_BATCH = 4;
 const MAX_CONTEXT = 12;
 const MAX_FIXES = 2;
+const MAX_REVIEW_REQUESTS = 4;
 const MAX_CI_RETRIES = 2;
 const MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const SEVERITY_PRIORITY = { high: 4, major: 3, medium: 2, minor: 1, low: 1, info: 0 };
@@ -1074,6 +1075,13 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     const marker = `${REVIEW_MARKER}${sha}${boundary ? `:${boundary.key}` : ""} -->`;
     if (!existing.some((comment) => comment.user?.login === appLogin && comment.body?.includes(marker))) {
       if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
+      const requested = existing.filter((comment) => comment.user?.login === appLogin &&
+        (comment.body?.startsWith(`${REVIEW_MARKER}${sha} -->`) || comment.body?.startsWith(`${REVIEW_MARKER}${sha}:`)));
+      if (requested.length >= MAX_REVIEW_REQUESTS) {
+        await withdrawHandoffs(app, repo, issue, appLogin, "same-head review cycles exhausted their bounded request budget", dryRun);
+        await escalate(app, repo, issue, `PR #${pr.number} exhausted ${MAX_REVIEW_REQUESTS} verified review requests for this head; repeated review cycles need human assessment`, dryRun, appLogin);
+        return;
+      }
       await note(`${repo}#${issue.number}: requesting Copilot review of PR #${pr.number} at ${sha}.`);
       if (!dryRun) {
         await requestCopilotReview(app, human, repo, pr.number);
