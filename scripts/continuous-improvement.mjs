@@ -97,35 +97,37 @@ export function checkState(checks, status) {
     (status.statuses.length > 0 && status.state === "success") ? "passed" : "pending";
 }
 
-export function validateProposal(proposal, alerts) {
+export function validateProposal(proposal, alerts, onReject = () => {}) {
+  const reject = (reason) => { onReject(reason); return null; };
+  if (proposal?.estimates && budgetRisk(proposal.estimates)) return reject("change_budget");
   if (!proposal || proposal.decision !== "propose" || !["low", "medium"].includes(proposal.risk) ||
       typeof proposal.title !== "string" || !proposal.title.trim() ||
-      typeof proposal.rationale !== "string" || !proposal.rationale.trim() ||
+      typeof proposal.rationale !== "string" || !proposal.rationale.trim() || proposal.rationale.length > 2000 ||
       !proposal.estimates || budgetRisk(proposal.estimates) ||
       !["single-finding", "shared-root-cause", "repeated-corrective-pattern"].includes(proposal.cohesion?.kind) ||
       typeof proposal.cohesion.summary !== "string" || !proposal.cohesion.summary.trim() ||
       proposal.cohesion.summary.length > 600 ||
       !Array.isArray(proposal.cohesion.members) ||
       !Array.isArray(proposal.tests) || !proposal.tests.length ||
-      !proposal.tests.every((test) => typeof test === "string" && test.trim()) ||
+      !proposal.tests.every((test) => typeof test === "string" && test.trim() && test.length <= 1000) ||
       !Array.isArray(proposal.alertIds) || proposal.alertIds.length < 1 ||
       proposal.alertIds.length > MAX_BATCH || new Set(proposal.alertIds).size !== proposal.alertIds.length) {
-    return null;
+    return reject("proposal_fields");
   }
   const selected = proposal.alertIds.map((id) => alerts.find((alert) => alert.id === id));
-  if (selected.some((alert) => !alert) ||
-      new Set(selected.map((alert) => dirname(alert.path))).size !== 1 ||
-      selected.some((alert) => ["critical", "blocker"].includes(String(alert.severity).toLowerCase()))) return null;
+  if (selected.some((alert) => !alert)) return reject("unknown_finding");
+  if (new Set(selected.map((alert) => dirname(alert.path))).size !== 1) return reject("multiple_directories");
+  if (selected.some((alert) => ["critical", "blocker"].includes(String(alert.severity).toLowerCase()))) return reject("critical_finding");
   const members = proposal.cohesion.members;
   if (members.length !== selected.length || new Set(members.map((member) => member?.alertId)).size !== selected.length ||
       members.some((member) => !proposal.alertIds.includes(member?.alertId) ||
-        typeof member.change !== "string" || !member.change.trim() || member.change.length > 400)) return null;
-  if (selected.length === 1 ? proposal.cohesion.kind !== "single-finding" : proposal.cohesion.kind === "single-finding") return null;
+        typeof member.change !== "string" || !member.change.trim() || member.change.length > 400)) return reject("cohesion_members");
+  if (selected.length === 1 ? proposal.cohesion.kind !== "single-finding" : proposal.cohesion.kind === "single-finding") return reject("cohesion_kind");
   if (selected.length > 1) {
     const sameRule = selected.every((alert) => alert.source && alert.rule &&
       alert.source === selected[0].source && alert.rule === selected[0].rule);
     const sameFile = new Set(selected.map((alert) => alert.path)).size === 1;
-    if (!sameRule && (proposal.cohesion.kind !== "shared-root-cause" || !sameFile)) return null;
+    if (!sameRule && (proposal.cohesion.kind !== "shared-root-cause" || !sameFile)) return reject("unrelated_findings");
   }
   return { ...proposal, alerts: selected };
 }
@@ -1408,7 +1410,7 @@ export function improvementTask(repo, defaultBranch, proposal, counts) {
       `<!-- ${BATCH_MARKER}:${JSON.stringify({ alertIds: proposal.alertIds, baseline: counts,
         changeScope: CHANGE_SCOPE_VERSION, cohesion: proposal.cohesion, estimates: proposal.estimates })} -->`,
       "## Continuous improvement",
-      `**Scope:** ${clean(proposal.rationale, 500)}`,
+      `**Scope:** ${clean(proposal.rationale, 2000)}`,
       `**Logical fix (${proposal.cohesion.kind}):** ${clean(proposal.cohesion.summary, 600)}`,
       ...proposal.cohesion.members.map((member) => `- ${member.alertId}: ${clean(member.change, 400)}`),
       `**Estimated change budget:** non-test ${proposal.estimates.nonTest.files} files / ${proposal.estimates.nonTest.lines} lines; verified tests ${proposal.estimates.tests.files} files / ${proposal.estimates.tests.lines} lines (additions plus deletions). Policy: ${CHANGE_SCOPE_VERSION}.`,
@@ -1421,7 +1423,7 @@ export function improvementTask(repo, defaultBranch, proposal, counts) {
       `- Resolve the ${proposal.alertIds.length} selected finding(s); the controller verifies them against refreshed default-branch scans and reports before/after counts after merge.`,
       ...TESTING_INSTRUCTIONS.map((instruction) => `- ${instruction}`),
       "- Do not alter workflows, permissions, infrastructure or dependency major versions; stop and ask a human if necessary.",
-      `- Suggested verification: ${proposal.tests.map((command) => clean(command)).join("; ")}`,
+      `- Suggested verification: ${proposal.tests.map((command) => clean(command, 1000)).join("; ")}`,
       "- Open a pull request referencing this issue without an auto-closing keyword (Fixes/Closes/Resolves). The controller closes it after verifying the merged findings. Human review and merge are required.",
     ].join("\n"),
     labels: [BATCH_LABEL],
@@ -1490,14 +1492,15 @@ async function intake(app, human, repo, dryRun, appLogin, enabledSources, sonarT
   const unchanged = async () => (await app.request(`/repos/${repo}/commits/${encodeURIComponent(defaultBranch)}`)).sha === sourceRef &&
     !(await batchIssues(app, repo, human.login)).length;
   const analysis = await analyze(contextual, undefined, await testingContext(app, repo, sourceRef), unchanged);
-  const proposal = validateProposal(analysis, contextual);
+  let rejection;
+  const proposal = validateProposal(analysis, contextual, (reason) => { rejection = reason; });
   if (!proposal) {
     if (analysis.decision === "propose" && analysis.risk === "high") {
       await note(`${repo}: high-risk proposal left for human assessment: ${clean(analysis.rationale, 600)}.`);
       return;
     }
     if (analysis.decision !== "skip" || typeof analysis.rationale !== "string" || !analysis.rationale.trim()) {
-      throw new Error(`${repo}: impact analysis returned an invalid proposal/cohesion/change-budget response; no issue created`);
+      throw new Error(`${repo}: impact analysis proposal rejected (${rejection}); no issue created`);
     }
     await note(`${repo}: impact analysis skipped ${contextual.length} candidates: ${clean(analysis.rationale, 600)} (${Object.entries(counts).map(([source, count]) => `${source}: ${count}`).join(", ")} open findings).`);
     return;

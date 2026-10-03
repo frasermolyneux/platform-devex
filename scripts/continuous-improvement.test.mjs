@@ -69,6 +69,10 @@ test("improvement issues and agent assignments require appropriate new coverage 
   assert.match(task.body, /Suggested verification: dotnet test --filter ReminderTests/);
   assert.match(task.body, /Estimated change budget.*non-test 1 files \/ 30 lines; verified tests 2 files \/ 300 lines/);
   assert.match(task.body, /Human review and merge are required/);
+  const longCommand = `dotnet test ${"Established.Test.Project/".repeat(12)}Unit.csproj --filter FullyQualifiedName~ExactRegressionCase`;
+  assert.ok(longCommand.length > 250);
+  assert.ok(improvementTask("owner/repo", "main", { ...proposal, tests: [longCommand] }, counts).body.includes(longCommand),
+    "suggested commands must not silently truncate their project path or regression filter");
 });
 
 test("allowlist is explicit, deduplicated and rejects unsafe names", () => {
@@ -190,6 +194,10 @@ test("multi-finding selection requires an explicit per-finding relationship and 
   assert.equal(validateProposal(rootCause, differentRule), null, "same directory alone is insufficient");
   assert.ok(validateProposal(rootCause, differentRule.map((alert) => ({ ...alert, path: "src/A.cs" }))),
     "different symptoms in one file require an explicitly explained shared root cause");
+  const reasons = [];
+  assert.equal(validateProposal({ ...proposal, estimates: { ...proposal.estimates,
+    tests: { files: 3, lines: 751 } } }, alerts, (reason) => reasons.push(reason)), null);
+  assert.deepEqual(reasons, ["change_budget"], "logs identify the safe rejection category without dumping the response");
 });
 
 test("diff gate blocks sensitive paths and oversized changes", () => {
