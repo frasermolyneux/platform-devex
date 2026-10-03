@@ -1845,6 +1845,13 @@ test("missing exact Sonar commit metadata fails closed instead of trusting a fre
   } finally { restore(); }
 });
 
+test("analyzer/build suppression configurations are gated even when the diff fits the size budget", () => {
+  for (const filename of [".editorconfig", "src/settings.ruleset", "sonar-project.properties",
+    "Directory.Build.props", "src/Directory.Build.targets"]) {
+    assert.match(diffRisk({ changed_files: 1, additions: 1, deletions: 1 }, [{ filename }]), /gated path/);
+  }
+});
+
 test("an analysis changing between issue pages and final metadata invalidates the whole Sonar snapshot", async () => {
   const { state, run, restore } = mockImprovementPr();
   try {

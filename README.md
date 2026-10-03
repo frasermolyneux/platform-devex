@@ -97,6 +97,8 @@ analyzer diagnostics in added tests, not merely a passing quality gate. PR analy
 current (matching the exact PR head SHA), complete and unchanged throughout paging;
 introduced findings use the existing bounded repair budget or escalate.
 Never suppress diagnostics or drop required tests to fit the cap; narrow the batch instead.
+Analyzer configuration and shared MSBuild props/targets are deterministically gated before
+CI approval as well as during improvement reconciliation.
 An earlier handoff is explicitly withdrawn when its head changes, its batch escalates, or
 new findings/unavailable quality validation invalidate it. Handoffs made before the strict
 Sonar policy are withdrawn even while replacement validation is pending.

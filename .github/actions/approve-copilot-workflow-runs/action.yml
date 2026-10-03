@@ -89,11 +89,11 @@ runs:
         MARKER="<!-- devex-copilot-approve -->"
 
         # Anything touching CI definitions, composite actions, container
-        # build files, or the CODEOWNERS/dependabot config is always left
+        # build/analyzer files, or the CODEOWNERS/dependabot config is always left
         # for a human, regardless of what the model review says. This is
         # the primary control, not the LLM: it is the exact class of change
         # (workflow/CI tampering) the approval gate exists to catch.
-        DENY_REGEX='(^|/)\.github/workflows/|(^|/)\.github/actions/|(^|/)action\.ya?ml$|(^|/)Dockerfile([^/]*)$|^CODEOWNERS$|(^|/)docs/CODEOWNERS$|(^|/)\.github/CODEOWNERS$|(^|/)\.github/dependabot\.ya?ml$'
+        DENY_REGEX='(^|/)\.github/workflows/|(^|/)\.github/actions/|(^|/)action\.ya?ml$|(^|/)Dockerfile([^/]*)$|^CODEOWNERS$|(^|/)docs/CODEOWNERS$|(^|/)\.github/CODEOWNERS$|(^|/)\.github/dependabot\.ya?ml$|(^|/)(\.editorconfig|[^/]*\.ruleset|sonar-project\.properties|Directory\.Build\.(props|targets))$'
 
         # Select candidate actors; human ready-for-review and broad bot
         # actors undergo their own provenance gates below.

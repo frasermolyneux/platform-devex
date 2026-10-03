@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { parseObjectResponse, ResponseError, runReadOnlyAnalysis } from "./copilot-analysis.mjs";
 import {
@@ -20,6 +20,21 @@ const report = {
 };
 const comment = { id: 1, user: { login: "Copilot" }, html_url: "https://github.com/owner/repo/pull/8#issuecomment-1",
   body: marker(EVIDENCE_TAG, report) };
+
+test("approval's deterministic denylist blocks analyzer/build suppression configuration before SDK approval", async () => {
+  const action = await readFile(new URL("../.github/actions/approve-copilot-workflow-runs/action.yml", import.meta.url), "utf8");
+  const pattern = action.match(/DENY_REGEX='([^']+)'/)?.[1];
+  assert.ok(pattern, "approval must define its deterministic denylist");
+  const denied = new RegExp(pattern);
+  for (const path of [".editorconfig", "src/.editorconfig", "src/analyzers.ruleset",
+    "sonar-project.properties", "Directory.Build.props", "src/Directory.Build.targets",
+    ".github/workflows/verify.yml", ".github/actions/test/action.yml", "Dockerfile"]) {
+    assert.equal(denied.test(path), true, path);
+  }
+  for (const path of ["src/Tests/Fixture.cs", "src/Production.cs", "README.md"]) {
+    assert.equal(denied.test(path), false, path);
+  }
+});
 
 test("business JSON framing rejects prose, fences, multiple values, wrong types and duplicate/escaped keys", () => {
   for (const text of ["", "  ", "SECRET_PRIVATE prose", "```json\n{}\n```", "{}\n{}", "[]", "null",
