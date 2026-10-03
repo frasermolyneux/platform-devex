@@ -1,4 +1,5 @@
-import { posix } from "node:path";
+import { loadTestProjects, relativePath, testSourceProject } from "./test-projects.mjs";
+export { verifiedTestProject } from "./test-projects.mjs";
 
 export const SONAR_POLICY_VERSION = "test-style-advisory-v1";
 const TEST_STYLE_RULES = new Set([
@@ -17,90 +18,26 @@ export function isTestStyleCandidate(finding) {
         ["INFO", "LOW"].includes(impact.severity))));
 }
 
-const relativePath = (path) => typeof path === "string" && path.length > 0 &&
-  !path.startsWith("/") && !path.includes("\\") && !path.includes(":") &&
-  path.split("/").every((part) => part && part !== "." && part !== "..");
-const within = (file, directory) => directory === "." || file.startsWith(`${directory}/`);
-const defaultSource = (path) => !path.split("/").some((part) =>
-  part.startsWith(".") || /^(bin|obj|node_modules)$/i.test(part));
 const regular = (item) => item.type === "blob" && ["100644", "100755"].includes(item.mode);
-const stripComments = (xml) => xml.replace(/<!--[\s\S]*?-->/g, "");
-// Linked source and custom MSBuild composition can make a nominal test file production code too.
-const customCompilation = (xml) => /<!DOCTYPE|<!ENTITY|<(?:Import|Choose|Target|Compile|EnableDefault(?:Items|CompileItems)|DefaultItemExcludes(?:InProjectFolder)?|DefaultLanguageSourceExtension|OverrideDefaultCompileItems|BaseOutputPath|BaseIntermediateOutputPath|OutputPath|IntermediateOutputPath)\b|<PackageReference\b[^>]*\b(?:Remove|Update)\s*=/i.test(xml);
-
-export function verifiedTestProject(content) {
-  const xml = stripComments(content);
-  if (customCompilation(xml) || /\bCondition\s*=/i.test(xml) ||
-      !/<Project\s+Sdk=["']Microsoft\.NET\.Sdk["']\s*>/.test(xml) ||
-      [...xml.matchAll(/<IsTestProject>([^<]*)<\/IsTestProject>/gi)].some((match) => match[1].trim().toLowerCase() !== "true")) return false;
-  const packages = [...xml.matchAll(/<PackageReference\s+Include=["']([^"']+)["'][^>]*>/g)]
-    .map((match) => match[1]);
-  return packages.includes("Microsoft.NET.Test.Sdk") && [
-    ["xunit", "xunit.runner.visualstudio"], ["xunit.v3", "xunit.runner.visualstudio"],
-    ["NUnit", "NUnit3TestAdapter"], ["MSTest.TestFramework", "MSTest.TestAdapter"],
-  ].some(([framework, adapter]) => packages.includes(framework) && packages.includes(adapter));
-}
 
 export async function classifySonarFindings(api, repo, ref, findings, baseRef = ref) {
   const result = { version: SONAR_POLICY_VERSION, raw: findings, blocking: [], advisory: [] };
   const candidates = findings.filter((finding) => isTestStyleCandidate(finding) &&
     relativePath(finding.path) && finding.path.endsWith(".cs"));
   if (!candidates.length) return { ...result, blocking: findings };
-  if (typeof ref !== "string" || !ref || typeof baseRef !== "string" || !baseRef) {
-    console.warn(`::warning::${repo}: immutable source/base references unavailable; Sonar classification remains blocking`);
-    return { ...result, blocking: findings };
-  }
-  const snapshots = new Map();
-  let bytes = 0;
-  for (const revision of new Set([ref, baseRef])) {
-    const tree = await api.request(`/repos/${repo}/git/trees/${encodeURIComponent(revision)}?recursive=1`);
-    if (tree.truncated !== false || !Array.isArray(tree.tree) ||
-        tree.tree.some((item) => !relativePath(item?.path))) throw new Error(`${repo}: incomplete Sonar test-project inventory`);
-    const projects = tree.tree.filter((item) => /\.(cs|fs|vb)proj$/.test(item.path));
-    const configs = tree.tree.filter((item) => /(^|\/)Directory\.Build\.(props|targets)$/.test(item.path));
-    if (projects.length + configs.length > 32) throw new Error(`${repo}: Sonar test-project inventory exceeds 32 metadata files`);
-    const metadata = new Map(await Promise.all([...projects, ...configs].map(async (item) => {
-      if (!regular(item)) return [item.path, null];
-      const path = item.path.split("/").map(encodeURIComponent).join("/");
-      let file;
-      try {
-        file = await api.request(`/repos/${repo}/contents/${path}?ref=${encodeURIComponent(revision)}`);
-      } catch (error) {
-        if (!error.message.endsWith("HTTP 404")) throw error;
-        console.warn(`::warning::${repo}: missing Sonar project metadata ${item.path}; classification remains blocking`);
-        return [item.path, null];
-      }
-      if (file.type !== "file" || file.encoding !== "base64" || typeof file.content !== "string" ||
-          !Number.isSafeInteger(file.size) || file.size < 0 || file.size > 64_000) return [item.path, null];
-      const decoded = Buffer.from(file.content, "base64");
-      if (decoded.length !== file.size) return [item.path, null];
-      const content = decoded.toString("utf8");
-      bytes += Buffer.byteLength(content);
-      if (bytes > 180_000) throw new Error(`${repo}: Sonar test-project metadata exceeds 180 KB`);
-      return [item.path, content];
-    })));
-    snapshots.set(revision, { tree: tree.tree, projects, metadata,
-      ambiguous: [...metadata].some(([path, content]) => content === null || customCompilation(stripComments(content)) ||
-        (/Directory\.Build\.(props|targets)$/.test(path) && /<IsTestProject\b/i.test(stripComments(content)))) });
-  }
-  const head = snapshots.get(ref);
-  const base = snapshots.get(baseRef);
+  const inventory = await loadTestProjects(api, repo, ref, baseRef);
+  if (!inventory) return { ...result, blocking: findings };
+  const { head } = inventory;
   for (const finding of findings) {
     let project;
     let repositoryPath;
     if (isTestStyleCandidate(finding) && relativePath(finding.path) && finding.path.endsWith(".cs") &&
-        !head.ambiguous && !base.ambiguous) {
+        !head.ambiguous && !inventory.base.ambiguous) {
       const matches = head.tree.filter((item) => regular(item) &&
         (item.path === finding.path || (!finding.path.startsWith("src/") && item.path === `src/${finding.path}`)));
-      if (matches.length === 1 && defaultSource(matches[0].path)) {
+      if (matches.length === 1) {
         repositoryPath = matches[0].path;
-        const owners = head.projects.filter((item) => within(repositoryPath, posix.dirname(item.path)));
-        if (owners.length === 1 && owners[0].path.endsWith(".csproj")) {
-          const path = owners[0].path;
-          const baseOwners = base.projects.filter((item) => within(repositoryPath, posix.dirname(item.path)));
-          if (baseOwners.length === 1 && baseOwners[0].path === path &&
-              verifiedTestProject(head.metadata.get(path)) && verifiedTestProject(base.metadata.get(path))) project = path;
-        }
+        project = testSourceProject(inventory, repositoryPath);
       }
     }
     if (project) result.advisory.push({ ...finding, repositoryPath, testProject: project });

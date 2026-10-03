@@ -139,8 +139,23 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   passing build/format checks alone may not cover CI diagnostics. Identify hosted-only checks
   separately from executed local commands; never invent execution or add credentials/infrastructure.
   Reuse existing tooling; never introduce unrelated test setup or omit coverage to meet scope
-  limits. Test files may be in separate directories but count toward eight files/250 changed
-  lines. Testing blockers require human guidance, and human review assesses coverage adequacy.
+  limits. Apply `bounded-test-budget-v1` in `scripts/change-scope.mjs`: non-test/unverified
+  changes at most eight files/250 added+deleted lines; verified test source at most eight
+  files/750 lines; entire PR at most 12 files/1,000 lines. Test source may be in separate
+  directories, but its allowance requires unambiguous existing C# SDK test-project proof
+  at immutable head and trusted base via `scripts/test-projects.mjs`, not a test-like name.
+  Check both sides of renames; count unknown languages, fixtures and configuration normally.
+  Per-file counts must match PR totals. Report actual category counts and verified paths
+  in handoffs. Larger budgets never authorize weaker assertions, new infrastructure or
+  unrelated test churn. Testing blockers require human guidance, and human review assesses
+  coverage adequacy.
+- Intake defaults to one finding/one logical fix, not a daily quota. At most four findings
+  in one directory need an explicit shared root cause or repeated corrective pattern,
+  concrete per-finding changes and separate non-test/test estimates. Multi-finding plans
+  must share a scanner/rule, or explain a shared root cause for different rules in one file.
+  Correlated locations/rules alone are not semantic proof. Reject malformed plans explicitly.
+  Keep one active batch per repository and human final merge; never start another to meet
+  a daily throughput target or reset existing repair/review budgets.
 - New batch issues carry the `platform-devex-ci` label in addition to their body marker; query
   this label when locating open/closed batches so unrelated issues in the same repository do not
   exhaust pagination. Do not remove the label from an in-progress issue.

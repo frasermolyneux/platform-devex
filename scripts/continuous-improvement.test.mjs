@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { EVIDENCE_TAG, marker, publishEvidenceBody } from "./review-lifecycle.mjs";
 import { sonarPolicyMarker, SONAR_POLICY_VERSION } from "./sonar-policy.mjs";
+import { CHANGE_SCOPE_VERSION, changeScopeMarker } from "./change-scope.mjs";
 import {
   addContext,
   analyze,
@@ -32,7 +33,10 @@ function assertTestingInstructions(text) {
   assert.match(text, /PR description, record added\/updated test paths, commands, pass\/fail outcomes/);
   assert.match(text, /stop for human guidance; never omit required coverage to meet the size limit/);
   assert.match(text, /targeted tests may live in separate test directories/);
-  assert.match(text, /entire PR, including tests, within eight files and 250 added\/deleted lines/);
+  assert.match(text, /Production and all unverified\/non-test changes: at most eight files and 250 added\/deleted lines/);
+  assert.match(text, /Verified test-only changes: at most eight files and 750 added\/deleted lines/);
+  assert.match(text, /Entire PR: at most 12 files and 1000 added\/deleted lines/);
+  assert.match(text, /shared directory alone is not a relationship/);
   assert.match(text, /require zero blocking new findings/);
   assert.match(text, /existing CI-equivalent analyzer checks/);
   assert.match(text, /Advisory findings remain visible/);
@@ -42,12 +46,16 @@ test("improvement issues and agent assignments require appropriate new coverage 
   const proposal = {
     title: "Simplify reminders", rationale: "Preserve recipient selection and failure isolation",
     alertIds: ["sonarcloud:One"], tests: ["dotnet test --filter ReminderTests"],
+    cohesion: { kind: "single-finding", summary: "Preserve reminder recipient selection",
+      members: [{ alertId: "sonarcloud:One", change: "Simplify one selection condition with focused regression coverage" }] },
+    estimates: { nonTest: { files: 1, lines: 30 }, tests: { files: 2, lines: 300 } },
     alerts: [{ id: "sonarcloud:One", severity: "medium", summary: "Simplify", url: "https://sonarcloud.io/example" }],
   };
   const counts = { "code-scanning": 2, sonarcloud: 4 };
   const task = improvementTask("owner/repo", "main", proposal, counts);
   assert.equal(task.title, "Continuous improvement: Simplify reminders");
-  assert.deepEqual(parseBatch(task.body), { alertIds: proposal.alertIds, baseline: counts });
+  assert.deepEqual(parseBatch(task.body), { alertIds: proposal.alertIds, baseline: counts,
+    changeScope: CHANGE_SCOPE_VERSION, cohesion: proposal.cohesion, estimates: proposal.estimates });
   assert.deepEqual(task.labels, ["platform-devex-ci"]);
   assert.deepEqual(task.assignees, ["copilot-swe-agent[bot]"]);
   assert.equal(task.agent_assignment.target_repo, "owner/repo");
@@ -55,6 +63,7 @@ test("improvement issues and agent assignments require appropriate new coverage 
   assertTestingInstructions(task.body);
   assertTestingInstructions(task.agent_assignment.custom_instructions);
   assert.match(task.body, /Suggested verification: dotnet test --filter ReminderTests/);
+  assert.match(task.body, /Estimated change budget.*non-test 1 files \/ 30 lines; verified tests 2 files \/ 300 lines/);
   assert.match(task.body, /Human review and merge are required/);
 });
 
@@ -134,7 +143,10 @@ test("analysis cannot select unknown, critical or unrelated findings", () => {
     { id: "dependabot:3", severity: "critical", path: "src/package.json" },
   ];
   const proposal = { decision: "propose", risk: "low", title: "Fix", rationale: "small",
-    tests: ["npm test"], alertIds: ["code-scanning:1"] };
+    tests: ["npm test"], alertIds: ["code-scanning:1"],
+    cohesion: { kind: "single-finding", summary: "One bounded fix",
+      members: [{ alertId: "code-scanning:1", change: "Address the selected finding" }] },
+    estimates: { nonTest: { files: 1, lines: 20 }, tests: { files: 1, lines: 40 } } };
   assert.deepEqual(validateProposal(proposal, alerts)?.alertIds, proposal.alertIds);
   assert.equal(validateProposal({ ...proposal, alertIds: ["code-scanning:1", "code-scanning:2"] }, alerts), null);
   assert.equal(validateProposal({ ...proposal, alertIds: ["dependabot:3"] }, alerts), null);
@@ -145,17 +157,52 @@ test("analysis cannot select unknown, critical or unrelated findings", () => {
   assert.equal(validateProposal({ ...proposal, alertIds: [sonar.id] }, [...alerts, sonar]), null);
 });
 
+test("multi-finding selection requires an explicit per-finding relationship and bounded separate estimates", () => {
+  const alerts = [
+    { id: "sonarcloud:A", source: "sonarcloud", rule: "same", path: "src/A.cs", severity: "medium" },
+    { id: "sonarcloud:B", source: "sonarcloud", rule: "same", path: "src/B.cs", severity: "medium" },
+    { id: "sonarcloud:C", source: "sonarcloud", rule: "other", path: "src/C.cs", severity: "medium" },
+  ];
+  const proposal = { decision: "propose", risk: "low", title: "One pattern", rationale: "Preserve behavior",
+    alertIds: ["sonarcloud:A", "sonarcloud:B"], tests: ["dotnet test"],
+    cohesion: { kind: "repeated-corrective-pattern", summary: "Apply the same bounded correction",
+      members: [{ alertId: "sonarcloud:A", change: "Correct the same operation in A" },
+        { alertId: "sonarcloud:B", change: "Correct the same operation in B" }] },
+    estimates: { nonTest: { files: 2, lines: 100 }, tests: { files: 3, lines: 500 } } };
+  assert.ok(validateProposal(proposal, alerts));
+  for (const change of [
+    { cohesion: undefined }, { estimates: undefined },
+    { cohesion: { ...proposal.cohesion, summary: "" } },
+    { cohesion: { ...proposal.cohesion, kind: "single-finding" } },
+    { cohesion: { ...proposal.cohesion, members: [proposal.cohesion.members[0]] } },
+    { cohesion: { ...proposal.cohesion, members: [proposal.cohesion.members[0], proposal.cohesion.members[0]] } },
+    { estimates: { ...proposal.estimates, nonTest: { files: 2, lines: 251 } } },
+    { estimates: { ...proposal.estimates, tests: { files: 3, lines: 751 } } },
+    { estimates: { nonTest: { files: 8, lines: 100 }, tests: { files: 5, lines: 100 } } },
+  ]) assert.equal(validateProposal({ ...proposal, ...change }, alerts), null);
+  const differentRule = alerts.map((alert) => alert.id === "sonarcloud:B" ? { ...alert, rule: "other" } : alert);
+  assert.equal(validateProposal(proposal, differentRule), null);
+  const rootCause = { ...proposal, cohesion: { ...proposal.cohesion, kind: "shared-root-cause" } };
+  assert.equal(validateProposal(rootCause, differentRule), null, "same directory alone is insufficient");
+  assert.ok(validateProposal(rootCause, differentRule.map((alert) => ({ ...alert, path: "src/A.cs" }))),
+    "different symptoms in one file require an explicitly explained shared root cause");
+});
+
 test("diff gate blocks sensitive paths and oversized changes", () => {
   const pr = { changed_files: 1, additions: 5, deletions: 1 };
-  assert.equal(diffRisk(pr, [{ filename: "src/a.js" }]), null);
-  assert.match(diffRisk(pr, [{ filename: ".github/workflows/ci.yml" }]), /gated path/);
-  assert.match(diffRisk(pr, [{ filename: "src/a.js", previous_filename: "infra/main.tf" }]), /gated path/);
-  assert.equal(diffRisk({ ...pr, additions: 249, deletions: 1 }, [{ filename: "src/a.js" }]), null);
-  assert.match(diffRisk({ ...pr, additions: 251 }, [{ filename: "src/a.js" }]), /250-line/);
-  assert.match(diffRisk({ ...pr, changed_files: 9 }, [{ filename: "src/a.js" }]), /eight-file/);
+  const file = { filename: "src/a.js", additions: 5, deletions: 1 };
+  assert.equal(diffRisk(pr, [file]), null);
+  assert.match(diffRisk(pr, [{ ...file, filename: ".github/workflows/ci.yml" }]), /gated path/);
+  assert.match(diffRisk(pr, [{ ...file, previous_filename: "infra/main.tf" }]), /gated path/);
+  assert.equal(diffRisk({ ...pr, additions: 249 }, [{ ...file, additions: 249 }]), null);
+  assert.match(diffRisk({ ...pr, additions: 250 }, [{ ...file, additions: 250 }]), /250-line/);
+  assert.match(diffRisk({ changed_files: 9, additions: 9, deletions: 0 },
+    Array.from({ length: 9 }, (_, n) => ({ filename: `src/${n}.js`, additions: 1, deletions: 0 }))), /eight-file/);
   const files = ["src/a.js", "tests/unit/a.test.js", "tests/integration/a.test.js", "tests/playwright/a.spec.js"]
-    .map((filename) => ({ filename }));
+    .map((filename) => ({ filename, additions: 50, deletions: 5 }));
   assert.equal(diffRisk({ changed_files: 4, additions: 200, deletions: 20 }, files), null);
+  files[0].additions += 30;
+  files[0].deletions++;
   assert.match(diffRisk({ changed_files: 4, additions: 230, deletions: 21 }, files), /250-line/);
 });
 
@@ -768,7 +815,7 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
       },
       "/repos/owner/repo": { default_branch: "main" },
       "/repos/owner/repo/issues/8/comments?per_page=100": prComments,
-      "/repos/owner/repo/pulls/8/files?per_page=100": [{ filename: "src/a.js" }],
+      "/repos/owner/repo/pulls/8/files?per_page=100": [{ filename: "src/a.js", additions: 2, deletions: 1 }],
       "/repos/owner/repo/compare/main...abcd": { behind_by: 0 },
       "/repos/owner/repo/commits/abcd/check-runs?per_page=100": {
         total_count: 1, check_runs: [{ status: "completed", conclusion: "failure" }],
@@ -827,7 +874,8 @@ function mockImprovementPr() {
     issueComments: [],
     prComments: [],
     workflowRuns: [],
-    files: [{ filename: "src/a.js", patch: "@@ -1 +1 @@\n-export const a=0;\n+export const a=1;" }],
+    files: [{ filename: "src/a.js", additions: 2, deletions: 1, status: "modified",
+      patch: "@@ -1 +1 @@\n-export const a=0;\n+export const a=1;" }],
     verificationCalls: 0,
     normalizationCalls: 0,
     verificationDecisions: {},
@@ -1886,7 +1934,8 @@ test("missing exact Sonar commit metadata fails closed instead of trusting a fre
 test("analyzer/build suppression configurations are gated even when the diff fits the size budget", () => {
   for (const filename of [".editorconfig", "src/settings.ruleset", "sonar-project.properties",
     "Directory.Build.props", "src/Directory.Build.targets", "scripts/sonar-policy.mjs"]) {
-    assert.match(diffRisk({ changed_files: 1, additions: 1, deletions: 1 }, [{ filename }]), /gated path/);
+    assert.match(diffRisk({ changed_files: 1, additions: 1, deletions: 1 },
+      [{ filename, additions: 1, deletions: 1 }]), /gated path/);
   }
 });
 
@@ -1963,6 +2012,75 @@ test("quality validation disappearing during SDK verification withdraws a previo
 });
 
 const verifiedProjectXml = '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" /><PackageReference Include="xunit.runner.visualstudio" /></ItemGroup></Project>';
+
+function largerVerifiedTestDiff(state) {
+  const project = "src/Checks/Checks.csproj";
+  const path = "src/Checks/Regression.cs";
+  state.tree.push(...[project, path].map((path) => ({ type: "blob", mode: "100644", path })));
+  state.baseTree = state.tree.filter((item) => item.path !== path);
+  state.sourceFiles[project] = verifiedProjectXml;
+  state.sourceFiles[path] = "public class Regression { }";
+  state.files.push({ filename: path, status: "added", additions: 500, deletions: 0,
+    patch: "@@ -0,0 +1 @@\n+public class Regression { }" });
+  state.pr.changed_files = 2;
+  state.pr.additions = 502;
+  return { project, path };
+}
+
+test("large verified test diffs use their separate budget and report actual categories at human handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    const { project, path } = largerVerifiedTestDiff(state);
+    state.onVerify = (context) => {
+      assert.deepEqual(context.changeScope.nonTest, { files: 1, lines: 3 });
+      assert.deepEqual(context.changeScope.tests, { files: 1, lines: 500 });
+      assert.deepEqual(context.changeScope.verifiedTestFiles, [{ path, project }]);
+    };
+    await run();
+    const ready = state.issueComments.find((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:"));
+    assert.ok(ready);
+    assert.ok(ready.body.includes(changeScopeMarker(state.pr.head.sha)));
+    assert.match(ready.body, /non-test\/unverified 1\/8 files, 3\/250 lines; verified tests 1\/8 files, 500\/750 lines; total 2\/12 files, 503\/1000 lines/);
+    assert.match(ready.body, /Test allowance: src\/Checks\/Regression.cs.*Checks.csproj/);
+    assert.equal(state.verificationCalls, 1, "coverage/conversations are still independently verified");
+  } finally { restore(); }
+});
+
+test("production moved to a test directory cannot exploit the larger allowance", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    largerVerifiedTestDiff(state);
+    state.files[1].status = "renamed";
+    state.files[1].previous_filename = "src/Production.cs";
+    state.baseTree.push({ path: "src/Production.cs", type: "blob", mode: "100644" });
+    await run();
+    assert.equal(state.verificationCalls, 0);
+    assert.ok(state.issueComments.some((comment) => comment.body.includes("250-line limit")));
+    assert.equal(state.issueComments.some((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:")), false);
+  } finally { restore(); }
+});
+
+test("the test allowance never waives required coverage or grants stale-base handoffs", async () => {
+  for (const scenario of ["coverage-gap", "base-race"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      greenReviewed(state);
+      largerVerifiedTestDiff(state);
+      if (scenario === "coverage-gap") state.coverageDecision = "fix";
+      else state.onVerify = () => { state.pr.base.sha = "new-base"; };
+      await run();
+      assert.equal(state.verificationCalls, 1);
+      assert.equal(state.issueComments.some((comment) => comment.body.startsWith("<!-- platform-devex-ci-ready:")), false);
+      if (scenario === "coverage-gap") {
+        const repair = state.writes.find((write) => write.body?.body?.includes("@copilot"));
+        assert.ok(repair);
+        assertTestingInstructions(repair.body.body);
+      } else assert.equal(state.writes.length, 0, "a changed trusted base invalidates cached ownership proof");
+    } finally { restore(); }
+  }
+});
 
 function verifiedStyleFinding(state, key = "new-info") {
   const project = "src/Checks/Checks.csproj";

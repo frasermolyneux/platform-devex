@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseObjectResponse, ResponseError, runReadOnlyAnalysis } from "./copilot-analysis.mjs";
 import { SONAR_POLICY_INSTRUCTIONS } from "./sonar-policy.mjs";
+import { CHANGE_SCOPE_INSTRUCTIONS } from "./change-scope.mjs";
 
 export const EVIDENCE_TAG = "platform-devex-ci-evidence";
 export const BOUNDARY_TAG = "platform-devex-ci-review-boundary";
@@ -215,7 +216,7 @@ export async function verifyReviewThreads(context, run = runReadOnlyAnalysis, ca
     "resolve requires affirmative proof that the actual finding is addressed: identify the relevant implementation/assertions or the published description evidence. A test helper alone does not prove its production caller invokes/awaits it. Tests must actually be discovered/executed by established tooling; an orphan test script is not coverage.",
     "Never infer resolution merely from green CI, an outdated conversation, an agent's claim, a resolved sibling or the absence of a repeated comment. Preserve observable behavior; do not demand unrelated behavior changes.",
     `${SONAR_POLICY_INSTRUCTIONS} This scanner policy does not authorize resolving or ignoring review conversations; every supplied conversation still requires affirmative verification, and coverage requirements are unchanged.`,
-    "fix means a specific bounded code/test defect remains. human means ambiguous/insufficient proof, inaccessible required context, an unverifiable execution claim, or work that cannot safely meet the eight-file/250-line limit. Explicitly check appropriate unit/integration/Playwright coverage and rationale.",
+    `fix means a specific bounded code/test defect remains. human means ambiguous/insufficient proof, inaccessible required context, an unverifiable execution claim, or work that cannot safely meet the change budgets. ${CHANGE_SCOPE_INSTRUCTIONS} Explicitly check appropriate unit/integration/Playwright coverage and rationale; the larger test allowance does not authorize weaker assertions or unrelated test churn.`,
     "Independently assess coverage even when there are NO unresolved conversations. coverage.verified requires focused relevant assertions or exact existing coverage, discovered test wiring, appropriate boundary/browser coverage or valid non-applicability rationale, and credible execution results. coverage.fix means a specific missing regression can be added safely within scope; give the exact gap. coverage.human means uncertain/inaccessible proof or testing outside the authorized scope; never turn an unexecuted/orphan script into verified integration coverage.",
     JSON.stringify(context),
   ].join("\n");

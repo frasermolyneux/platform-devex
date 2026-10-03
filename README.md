@@ -64,9 +64,23 @@ For each opted-in repository, the workflow reads open default-branch CodeQL/code
 Dependabot and SonarCloud **code-smell** findings. It samples up to 12 source excerpts from
 different rule/directory groups (not merely the first dozen alerts), and asks the Copilot SDK
 for an actionable, behavior-preserving quality or security improvement. It creates an issue
-only for a bounded low- or medium-risk proposal with at most four findings in one directory.
+only for a bounded low- or medium-risk logical fix, defaulting to one finding. Up to four
+findings in one directory may be selected only with an explicit shared root cause or repeated
+corrective pattern and a concrete change for every ID. Multiple findings must share a
+scanner/rule; different rules require a shared root cause in the same file. A common
+rule/directory/file alone is not proof of a relationship or a reason to fill a four-item quota.
+Issues record the relationship and separate non-test/test file and line estimates;
+invalid proposals are reported as errors rather than disguised as "no improvements".
 Critical/blocker alerts, CI/infrastructure/auth changes and uncertain behavior remain for a
-human. A proposed PR may touch at most eight files and 250 changed lines; gated paths are
+human. The shared `bounded-test-budget-v1` policy in `scripts/change-scope.mjs` allows:
+
+| Scope | Files | Changed lines (additions plus deletions) |
+|---|---:|---:|
+| Production and all non-test/unverified changes | 8 | 250 |
+| Verified test-only source | 8 | 750 |
+| Entire PR | 12 | 1,000 |
+
+Per-file counts must exactly reconcile with GitHub's full PR totals. Gated paths are
 always escalated. Stale alerts whose source files no longer exist on the default branch are
 skipped with a warning; SonarCloud paths relative to a scanned `src` directory are resolved
 against GitHub before sampling. Eligible issues are assigned to Copilot, with a requirement to preserve
@@ -77,8 +91,18 @@ Playwright tests for affected user-facing journeys where the repository uses it.
 changes do not require browser tests. Existing coverage may be reused only with the exact
 covering tests and a rationale; the PR must identify test changes, applicable layers, commands
 and results. Use existing test tooling, without unrelated setup or architecture changes.
-Test files may live outside the production directory, but still count toward the eight-file,
-250-line limit; inadequate coverage must not be dropped to fit that limit. Testing blockers
+Test source may live outside the production directory. The larger allowance applies only to
+regular C# source owned unambiguously by established SDK test projects, using the same
+bounded head/trusted-base metadata proof as Sonar advisories (`scripts/test-projects.mjs`).
+Added source must belong to an already-established test project; modifications/removals
+require base-source proof, and renames require proof on both sides, so moving production
+code into a tests directory cannot waive its normal budget. Names alone are never proof.
+Other languages, fixtures, project/configuration files and uncertain ownership remain in the
+normal budget; no unsupported test-discovery assumptions are made. This is structural
+ownership proof, not execution evidence. Handoffs and verification context report actual
+non-test/test/total counts, policy version and the verified test paths/projects. Test-related
+deletions still count, and inadequate coverage must not be dropped or weakened to fit a
+budget. Shared policy modules are protected from autonomous changes. Testing blockers
 require human guidance. Green checks are not automatic proof of adequate regression coverage:
 the final human review still assesses the tests and any justification for unchanged coverage.
 Batch issues

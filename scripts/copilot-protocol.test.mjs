@@ -27,7 +27,8 @@ test("approval's deterministic denylist blocks analyzer/build suppression config
   assert.ok(pattern, "approval must define its deterministic denylist");
   const denied = new RegExp(pattern);
   for (const path of [".editorconfig", "src/.editorconfig", "src/analyzers.ruleset",
-    "sonar-project.properties", "scripts/sonar-policy.mjs", "Directory.Build.props", "src/Directory.Build.targets",
+    "sonar-project.properties", "scripts/sonar-policy.mjs", "scripts/test-projects.mjs", "scripts/change-scope.mjs",
+    "Directory.Build.props", "src/Directory.Build.targets",
     ".github/workflows/verify.yml", ".github/actions/test/action.yml", "Dockerfile"]) {
     assert.equal(denied.test(path), true, path);
   }

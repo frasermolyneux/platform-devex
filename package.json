@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check scripts/continuous-improvement.mjs && node --check scripts/copilot-analysis.mjs && node --check scripts/review-lifecycle.mjs && node --check scripts/sonar-policy.mjs && node --check .github/actions/delegate-failed-checks/eligibility.mjs && node --check .github/actions/approve-copilot-workflow-runs/workflow-runs.mjs && node --check .github/actions/approve-copilot-workflow-runs/risk-review.mjs && node --check .github/actions/approve-copilot-workflow-runs/approval-audit.mjs",
+    "check": "node --check scripts/continuous-improvement.mjs && node --check scripts/copilot-analysis.mjs && node --check scripts/review-lifecycle.mjs && node --check scripts/sonar-policy.mjs && node --check scripts/test-projects.mjs && node --check scripts/change-scope.mjs && node --check .github/actions/delegate-failed-checks/eligibility.mjs && node --check .github/actions/approve-copilot-workflow-runs/workflow-runs.mjs && node --check .github/actions/approve-copilot-workflow-runs/risk-review.mjs && node --check .github/actions/approve-copilot-workflow-runs/approval-audit.mjs",
     "test": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
