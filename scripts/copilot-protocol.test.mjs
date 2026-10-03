@@ -80,6 +80,29 @@ test("authored reports may contain one JSON fence and explicit multi-file/format
   assert.equal(agentEvidenceCandidate([malformed], "abcd"), null);
 });
 
+test("explicitly uncommitted experiments cannot replace genuine current-head execution evidence", async () => {
+  const actual = { ...comment, id: 10 };
+  for (const dirty of [{ patch_committed: false }, { worktree_dirty: true }]) {
+    const experiment = { ...comment, id: 11, body: marker(EVIDENCE_TAG, {
+      ...report, ...dirty, commands: [{ command: "node --test", outcome: "failed", details: "Uncommitted experiment failed" }],
+    }) };
+    assert.equal(evidenceReport([actual, experiment], "abcd", "owner").comment, actual);
+    assert.equal(agentEvidenceCandidate([experiment], "abcd"), null);
+    const legacy = { ...experiment, body: JSON.stringify({
+      commit_sha: "abcd", ...dirty, coverage: report.layers,
+      tests: [{ path: "src/a.test.js", command: "node --test", result: "failed: 1 failed" }],
+    }) };
+    assert.equal(structuredAgentEvidence(legacy, "abcd", ["src/a.test.js"]), null);
+    assert.throws(() => validateNormalizedEvidence(report, legacy, "abcd"), /Uncommitted experiment/);
+    await assert.rejects(() => normalizeAgentEvidence(legacy, "abcd", ["src/a.test.js"],
+      async () => assert.fail("Do not call the model for explicitly uncommitted experiments")), /Uncommitted experiment/);
+  }
+  const genuinelyFailed = { ...comment, body: marker(EVIDENCE_TAG, {
+    ...report, commands: [{ command: "node --test", outcome: "failed", details: "Committed tree failed" }],
+  }) };
+  assert.equal(evidenceReport([genuinelyFailed], "abcd", "owner").report.commands[0].outcome, "failed");
+});
+
 test("business JSON framing rejects prose, fences, multiple values, wrong types and duplicate/escaped keys", () => {
   for (const text of ["", "  ", "SECRET_PRIVATE prose", "```json\n{}\n```", "{}\n{}", "[]", "null",
     JSON.stringify({ ...approved, touches_ci: "false" }), JSON.stringify({ ...approved, extra: true }),

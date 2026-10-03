@@ -5,11 +5,12 @@ export const EVIDENCE_TAG = "platform-devex-ci-evidence";
 export const BOUNDARY_TAG = "platform-devex-ci-review-boundary";
 export const VERIFICATION_TAG = "platform-devex-ci-thread-verification";
 export const NORMALIZATION_TAG = "platform-devex-ci-normalized-evidence";
-export const EVIDENCE_INSTRUCTIONS = 'After committing and running tests, post a standalone single-line comment: <!-- platform-devex-ci-evidence:{"sha":"FULL_FINAL_HEAD_SHA","testPaths":["path/to/test"],"commands":[{"command":"actual command","outcome":"passed","details":"actual result"}],"layers":{"unit":"cases covered","integration":"coverage or applicability rationale","playwright":"coverage or applicability rationale"},"threads":[{"id":"review thread ID","status":"addressed","evidence":"specific fix and regression proof"}]} -->. Use the final git rev-parse HEAD SHA and real outcomes (passed, failed, blocked or not-run). The controller publishes this report to the PR description; do not claim a description edit your tools cannot perform.';
+export const EVIDENCE_INSTRUCTIONS = 'After committing and running tests, post a standalone single-line comment: <!-- platform-devex-ci-evidence:{"sha":"FULL_FINAL_HEAD_SHA","testPaths":["path/to/test"],"commands":[{"command":"actual command","outcome":"passed","details":"actual result"}],"layers":{"unit":"cases covered","integration":"coverage or applicability rationale","playwright":"coverage or applicability rationale"},"threads":[{"id":"review thread ID","status":"addressed","evidence":"specific fix and regression proof"}]} -->. Use the final git rev-parse HEAD SHA and real outcomes (passed, failed, blocked or not-run). Run verification against that committed clean tree; uncommitted experiments are not current-head execution evidence and must be labeled separately. The controller publishes this report to the PR description; do not claim a description edit your tools cannot perform.';
 
 const text = (value, max = 2000) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
 const path = (value) => text(value, 300) && !value.startsWith("/") && !value.includes("\\") &&
   !value.split("/").some((part) => !part || part === "." || part === "..") && /^[\w./ -]+$/.test(value);
+const uncommittedReport = (report) => report.patch_committed === false || report.worktree_dirty === true;
 export class EvidenceError extends Error {}
 export const fingerprint = (value) => createHash("sha256").update(JSON.stringify(value) ?? "null").digest("hex");
 export const marker = (tag, value) => `<!-- ${tag}:${JSON.stringify(value).replaceAll("-->", "\\u002d\\u002d\\u003e")} -->`;
@@ -24,6 +25,7 @@ export function evidenceReport(comments, sha, humanLogin) {
     if (!["Copilot", "copilot-swe-agent[bot]", humanLogin].includes(comment.user?.login)) continue;
     const report = readMarker(comment.body, EVIDENCE_TAG);
     if (!report || report.sha !== sha) continue;
+    if (uncommittedReport(report)) continue;
     if ([report.commit_sha, report.head_sha].some((head) => head !== undefined && head !== sha)) {
       throw new EvidenceError(`Conflicting current-head test evidence in trusted comment ${comment.id}`);
     }
@@ -52,14 +54,18 @@ function agentReportData(comment) {
   return parseObjectResponse(wrapped?.[1] ?? fenced?.[1] ?? body);
 }
 
+function currentReportHead(data, sha) {
+  const heads = [data.sha, data.commit_sha, data.head_sha].filter((value) => value !== undefined);
+  return heads.length > 0 && heads.every((head) => head === sha) && !uncommittedReport(data);
+}
+
 export function agentEvidenceCandidate(comments, sha) {
   return [...comments].reverse().find((comment) => {
     if (!["Copilot", "copilot-swe-agent[bot]"].includes(comment.user?.login) || !comment.body) return false;
     const body = comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").trim();
     try {
       const data = agentReportData(comment);
-      const heads = [data.sha, data.commit_sha, data.head_sha].filter((value) => value !== undefined);
-      return heads.length > 0 && heads.every((head) => head === sha);
+      return currentReportHead(data, sha);
     } catch (error) {
       if (!(error instanceof ResponseError)) throw error;
       if (/^(?:\{|\[|```|<!-- platform-devex-ci-evidence:)/.test(body)) return false;
@@ -73,6 +79,7 @@ function reportedText(comment) {
   const body = comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").trim();
   try {
     const data = agentReportData(comment);
+    if (uncommittedReport(data)) throw new EvidenceError("Uncommitted experiment is not current-head execution evidence");
     const strings = [];
     const visit = (value) => {
       if (typeof value === "string") strings.push(value);
@@ -105,8 +112,7 @@ export function structuredAgentEvidence(comment, sha, changedPaths) {
     if (!(error instanceof ResponseError)) throw error;
     return null;
   }
-  const heads = [data.sha, data.commit_sha, data.head_sha].filter((value) => value !== undefined);
-  if (!heads.length || heads.some((head) => head !== sha) ||
+  if (!currentReportHead(data, sha) ||
       Object.hasOwn(data, "commands") || Object.hasOwn(data, "layers")) return null;
   let tests = data.tests;
   if (tests && !Array.isArray(tests) && typeof tests === "object" &&

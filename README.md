@@ -124,7 +124,9 @@ reports wrapped in the evidence marker with the known legacy shape or a single J
 fence, and explicitly listed multi-file formatting scopes; conflicting head
 declarations or malformed canonical commands are never reinterpreted as success. Unfamiliar
 reports can use restricted SDK normalization. Both must copy reported commands and
-results verbatim; publication is not independent test execution. Missing reports receive one
+results verbatim; publication is not independent test execution. Explicitly uncommitted or
+dirty-tree experiments are not evidence for the committed PR head, even when labeled with
+that SHA; genuine committed-tree failures still block. Missing reports receive one
 metadata-only request per head, outside the code-fix budget, with a 48-hour timeout.
 A no-tool SDK verification compares every unresolved Copilot conversation (including outdated
 and old-commit conversations) against the current source, full patch, test wiring and reported
