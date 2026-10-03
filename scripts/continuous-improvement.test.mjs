@@ -829,6 +829,8 @@ function mockImprovementPr() {
     rules: [],
     rollupState: "SUCCESS",
     rollupPartial: false,
+    sonarFindings: [],
+    sonarAnalysisDate: now,
     writes: [],
   };
   state.issue = {
@@ -849,6 +851,19 @@ function mockImprovementPr() {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const path = new URL(url).pathname + new URL(url).search;
+    if (new URL(url).origin === "https://sonarcloud.io") {
+      if (path.startsWith("/api/components/show")) return Response.json({ component: {
+        key: "owner_repo", qualifier: "TRK", organization: "owner", analysisDate: now,
+      } });
+      if (path.startsWith("/api/project_pull_requests/list")) return Response.json({ pullRequests: [
+        { key: "8", analysisDate: state.sonarAnalysisDate, commit: { sha: state.sonarAnalysisSha ?? state.pr.head.sha } },
+      ] });
+      if (path.startsWith("/api/issues/search")) return Response.json({
+        total: state.sonarTotal ?? state.sonarFindings.length,
+        paging: { pageIndex: 1, pageSize: 500 }, issues: state.sonarFindings,
+      });
+      assert.fail(`unexpected Sonar endpoint: ${path}`);
+    }
     if (init.method !== "GET") {
       const body = init.body ? JSON.parse(init.body) : null;
       if (path === "/graphql" && body.query.startsWith("query(")) {
@@ -894,6 +909,9 @@ function mockImprovementPr() {
         state.issueComments.push({ id: 100 + state.writes.length, created_at: now,
           user: { login: "app[bot]" }, body: body.body });
       }
+      if (path.startsWith("/repos/owner/repo/issues/comments/") && init.method === "PATCH") {
+        state.issueComments.find((comment) => path.endsWith(`/${comment.id}`)).body = body.body;
+      }
       if (path === "/repos/owner/repo/issues/8/comments") {
         state.prComments.push({ id: 200 + state.writes.length, created_at: now,
           user: { login: init.headers.Authorization.endsWith("human") ? "owner" : "app[bot]" }, body: body.body });
@@ -927,6 +945,9 @@ function mockImprovementPr() {
       [`/repos/owner/repo/compare/main...${state.pr.head.sha}`]: { behind_by: state.behindBy },
       [`/repos/owner/repo/commits/${state.pr.head.sha}/check-runs?per_page=100`]: state.checks,
       [`/repos/owner/repo/commits/${state.pr.head.sha}/status`]: state.status,
+      [`/repos/owner/repo/commits/${state.pr.head.sha}`]: {
+        commit: { committer: { date: new Date(Date.parse(now) - 60_000).toISOString() } },
+      },
       "/repos/owner/repo/pulls/8/reviews?per_page=100": state.reviews.map((review, index) => ({ id: index + 1, ...review })),
       [`/repos/owner/repo/git/trees/${state.pr.head.sha}?recursive=1`]: {
         truncated: false, tree: [{ type: "blob", path: "package.json" }],
@@ -1711,5 +1732,79 @@ test("known structured agent reports bypass probabilistic normalization while pr
     assert.equal(state.normalizationCalls, 0);
     assert.match(state.pr.body, /PASS: 1 passed, 0 failed/);
     assert.equal(state.writes.some((write) => write.body?.body?.includes("platform-devex-ci-evidence-request:")), false);
+  } finally { restore(); }
+});
+
+function sonarInfo() {
+  return { key: "new-info", project: "owner_repo", component: "owner_repo:src/a.test.js",
+    type: "CODE_SMELL", rule: "external_roslyn:IDE0058", severity: "INFO", line: 2,
+    message: "Expression value is never used" };
+}
+
+test("a green quality gate with one new INFO finding cannot reach review or human handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.sonarFindings = [sonarInfo()];
+    await run();
+    assert.equal(state.verificationCalls, 0);
+    assert.equal(state.writes.length, 1);
+    assert.match(state.writes[0].body.body, /Zero new SonarCloud findings.*INFO/);
+    assert.match(state.writes[0].body.body, /external_roslyn:IDE0058/);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("platform-devex-ci-ready:")), false);
+  } finally { restore(); }
+});
+
+test("new Sonar findings withdraw the previous handoff and exhausted code budgets escalate, never reset", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.sonarFindings = [sonarInfo()];
+    state.issueComments.push({ id: 77, user: { login: "app[bot]" },
+      body: "<!-- platform-devex-ci-ready:abcd -->\nPrevious ready handoff" });
+    state.prComments.push(...["one", "two"].map((sha) => ({ user: { login: "owner" },
+      body: `<!-- platform-devex-ci-fix:${sha} -->` })));
+    await run();
+    assert.match(state.issueComments[0].body, /^<!-- platform-devex-ci-handoff-withdrawn -->/);
+    assert.match(state.issueComments[0].body, /Previous ready handoff/);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("@copilot")), false);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("needs human attention")), true);
+  } finally { restore(); }
+});
+
+test("stale/incomplete Sonar PR analysis fails explicitly and withdraws misleading existing handoff", async () => {
+  for (const failure of ["stale", "partial"]) {
+    const { state, run, restore } = mockImprovementPr();
+    try {
+      greenReviewed(state);
+      state.issueComments.push({ id: 77, user: { login: "app[bot]" }, body: "<!-- platform-devex-ci-ready:abcd -->" });
+      if (failure === "stale") state.sonarAnalysisSha = "old";
+      else { state.sonarFindings = [sonarInfo()]; state.sonarTotal = 2; }
+      await assert.rejects(run(), failure === "stale" ? /does not match the current head/ : /incomplete or invalid/);
+      assert.equal(state.verificationCalls, 0);
+      assert.match(state.issueComments[0].body, /handoff-withdrawn/);
+    } finally { restore(); }
+  }
+});
+
+test("new Sonar findings appearing during coverage verification prevent a stale final handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.onVerify = () => state.sonarFindings.push(sonarInfo());
+    await run();
+    assert.equal(state.verificationCalls, 1);
+    assert.equal(state.writes.some((write) => write.body?.body?.startsWith("<!-- platform-devex-ci-ready:")), false);
+  } finally { restore(); }
+});
+
+test("quality dry-runs remain read-only even with findings and an existing handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.sonarFindings = [sonarInfo()];
+    state.issueComments.push({ id: 77, user: { login: "app[bot]" }, body: "<!-- platform-devex-ci-ready:abcd -->" });
+    await run("true");
+    assert.equal(state.writes.length, 0);
   } finally { restore(); }
 });

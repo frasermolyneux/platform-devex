@@ -120,6 +120,10 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   Diversify sampled rules and record before/after counts; wait for a post-merge Sonar analysis
   before resolving SonarCloud findings. Keep `SONAR_TOKEN` out of the SDK environment. Missing
   scanners, absent review, incomplete checks and third-party PRs are never safe; never auto-merge.
+  Before human handoff, require zero new SonarCloud PR findings including INFO diagnostics,
+  with complete current analysis; a green quality gate alone is insufficient. Use bounded
+  repairs or escalate/narrow, never suppress analyzers or drop required coverage to meet caps.
+  Withdraw previous handoffs when the head, escalation or quality state invalidates them.
 - Keep the shared continuous-improvement test requirements consistent in SDK intake, generated
   issue acceptance criteria, agent assignment and repair/review comments. Require focused
   added/extended unit/regression tests, integration tests for affected boundaries and Playwright
