@@ -1697,3 +1697,19 @@ test("existing differently shaped agent JSON is normalized once, published and r
     assert.match(state.writes.at(-1).body.body, /ready for \*\*human\*\*/);
   } finally { restore(); }
 });
+
+test("known structured agent reports bypass probabilistic normalization while preserving exact execution claims", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.pr.body = "Human summary\nRefs #7";
+    state.prComments = [{ id: 4, user: { login: "Copilot" }, body: JSON.stringify({
+      commit_sha: "abcd", tests: [{ path: "src/a.test.js", command: state.report.commands[0].command,
+        result: "PASS: 1 passed, 0 failed" }], coverage: state.report.layers,
+    }) }];
+    await run();
+    assert.equal(state.normalizationCalls, 0);
+    assert.match(state.pr.body, /PASS: 1 passed, 0 failed/);
+    assert.equal(state.writes.some((write) => write.body?.body?.includes("platform-devex-ci-evidence-request:")), false);
+  } finally { restore(); }
+});

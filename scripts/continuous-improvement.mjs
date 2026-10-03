@@ -7,7 +7,7 @@ import {
   BOUNDARY_TAG, EVIDENCE_INSTRUCTIONS, EvidenceError, NORMALIZATION_TAG, VERIFICATION_TAG,
   agentEvidenceCandidate, evidenceReport, fingerprint, normalizeAgentEvidence,
   marker as lifecycleMarker, publishEvidenceBody, readMarker, validateNormalizedEvidence,
-  validateThreadDecisions, verifyReviewThreads,
+  structuredAgentEvidence, validateThreadDecisions, verifyReviewThreads,
 } from "./review-lifecycle.mjs";
 
 const BATCH_MARKER = "platform-devex-ci-batch-v1";
@@ -1027,31 +1027,34 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
   if (!evidence) {
     const candidate = agentEvidenceCandidate(prComments, sha);
     if (candidate) {
-      const reportKey = fingerprint({ id: candidate.id, body: candidate.body });
-      const cached = existing.filter((comment) => comment.user?.login === appLogin)
-        .map((comment) => readMarker(comment.body, NORMALIZATION_TAG))
-        .findLast((record) => record?.sha === sha && record.key === reportKey);
-      if (cached?.report) evidence = validateNormalizedEvidence(cached.report, candidate, sha);
-      else if (!cached) {
-        if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
-        try {
-          evidence = await normalizeEvidence(candidate, sha, files.map((file) => file.filename),
-            (prompt) => runReadOnlyAnalysis(prompt, { token: human.token }));
-          evidence = validateNormalizedEvidence(evidence.report, candidate, sha);
-        } catch (error) {
-          if (!(error instanceof EvidenceError) && !(error instanceof ResponseError)) throw error;
-          await note(`${repo}#${issue.number}: authenticated agent report could not be normalized without inventing evidence; requesting metadata correction.`);
+      evidence = structuredAgentEvidence(candidate, sha, files.map((file) => file.filename));
+      if (!evidence) {
+        const reportKey = fingerprint({ id: candidate.id, body: candidate.body });
+        const cached = existing.filter((comment) => comment.user?.login === appLogin)
+          .map((comment) => readMarker(comment.body, NORMALIZATION_TAG))
+          .findLast((record) => record?.sha === sha && record.key === reportKey);
+        if (cached?.report) evidence = validateNormalizedEvidence(cached.report, candidate, sha);
+        else if (!cached) {
+          if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
+          try {
+            evidence = await normalizeEvidence(candidate, sha, files.map((file) => file.filename),
+              (prompt) => runReadOnlyAnalysis(prompt, { token: human.token }));
+            evidence = validateNormalizedEvidence(evidence.report, candidate, sha);
+          } catch (error) {
+            if (!(error instanceof EvidenceError) && !(error instanceof ResponseError)) throw error;
+            await note(`${repo}#${issue.number}: authenticated agent report could not be normalized without inventing evidence; requesting metadata correction.`);
+          }
+          if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
+          if (!await evidenceStillCurrent(app, repo, pr.number, { comment: candidate })) {
+            await note(`${repo}#${issue.number}: source report changed during normalization; discarding stale evidence.`);
+            return;
+          }
+          if (!dryRun) await app.request(`/repos/${repo}/issues/${issue.number}/comments`, {
+            method: "POST", body: { body: lifecycleMarker(NORMALIZATION_TAG, {
+              sha, key: reportKey, sourceCommentId: candidate.id, report: evidence?.report ?? null,
+            }) },
+          });
         }
-        if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
-        if (!await evidenceStillCurrent(app, repo, pr.number, { comment: candidate })) {
-          await note(`${repo}#${issue.number}: source report changed during normalization; discarding stale evidence.`);
-          return;
-        }
-        if (!dryRun) await app.request(`/repos/${repo}/issues/${issue.number}/comments`, {
-          method: "POST", body: { body: lifecycleMarker(NORMALIZATION_TAG, {
-            sha, key: reportKey, sourceCommentId: candidate.id, report: evidence?.report ?? null,
-          }) },
-        });
       }
     }
   }

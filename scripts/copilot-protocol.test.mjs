@@ -4,7 +4,7 @@ import test from "node:test";
 import { parseObjectResponse, ResponseError, runReadOnlyAnalysis } from "./copilot-analysis.mjs";
 import {
   EVIDENCE_TAG, agentEvidenceCandidate, evidenceReport, marker, normalizeAgentEvidence,
-  publishEvidenceBody, validateNormalizedEvidence, verifyReviewThreads,
+  publishEvidenceBody, structuredAgentEvidence, validateNormalizedEvidence, verifyReviewThreads,
 } from "./review-lifecycle.mjs";
 import { reviewRisk, validRiskDecision } from "../.github/actions/approve-copilot-workflow-runs/risk-review.mjs";
 import {
@@ -119,6 +119,24 @@ test("agent completion reports are normalized without accepting quoted requests,
   const result = await normalizeAgentEvidence(source, "abcd", ["src/a.js"], async (prompt) => {
     assert.match(prompt, /Copy commands\/results verbatim/);
     return JSON.stringify(report);
+  });
+
+  test("known coding-agent report shapes are adapted deterministically without rerolling model output or inventing results", () => {
+    const data = { commit_sha: "abcd", tests: [{ path: "/home/repo/src/a.test.js",
+      command: report.commands[0].command, result: "PASS: 1 passed, 0 failed" }],
+      coverage: { unit: { result: "PASS", evidence: "Actual caller assertion" },
+        integration: { reason: "Local stream only" }, playwright: { reason: "Backend only" } } };
+    const source = { ...comment, body: `> quoted request\n${JSON.stringify(data)}` };
+    const normalized = structuredAgentEvidence(source, "abcd", ["src/a.test.js"]);
+    assert.deepEqual(normalized.report.testPaths, ["src/a.test.js"]);
+    assert.equal(normalized.report.commands[0].details, data.tests[0].result);
+    assert.equal(normalized.report.commands[0].outcome, "passed");
+    assert.equal(structuredAgentEvidence(source, "new", ["src/a.test.js"]), null);
+    assert.equal(structuredAgentEvidence({ ...source, body: JSON.stringify({ ...data, coverage: null }) },
+      "abcd", ["src/a.test.js"]), null);
+    data.tests[0].result = "PASS: 1 passed, 2 failed";
+    assert.equal(structuredAgentEvidence({ ...source, body: JSON.stringify(data) },
+      "abcd", ["src/a.test.js"]).report.commands[0].outcome, "failed");
   });
   assert.equal(result.comment.id, source.id);
   assert.deepEqual(result.report, report);
