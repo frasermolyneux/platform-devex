@@ -11,8 +11,9 @@ export class ResponseError extends Error {
 }
 
 export class AnalysisError extends Error {
-  constructor() {
-    super("Copilot SDK analysis failed; response and credentials withheld");
+  constructor(category = "sdk_failure") {
+    super(`Copilot SDK analysis failed (${category}); response and credentials withheld`);
+    this.category = category;
   }
 }
 
@@ -58,12 +59,16 @@ export function parseObjectResponse(text, validate = () => true) {
 export async function runReadOnlyAnalysis(prompt, {
   token = process.env.COPILOT_AGENT_PAT,
   model = "auto",
+  timeoutMs = 120_000,
   createClient = async (options) => {
     const { CopilotClient } = await import("@github/copilot-sdk");
     return new CopilotClient(options);
   },
 } = {}) {
   if (!token) throw new Error("A human Copilot token is required for SDK analysis");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 240_000) {
+    throw new Error("SDK analysis timeout must be an integer between 1 and 240000 ms");
+  }
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (/(TOKEN|SECRET|PASSWORD|PRIVATE_KEY|_PEM|_PAT)$/i.test(key)) delete env[key];
@@ -77,12 +82,13 @@ export async function runReadOnlyAnalysis(prompt, {
       onPermissionRequest: () => ({ kind: "reject", feedback: "Analysis must be read-only." }),
       sessionLimits: { maxAiCredits: 30 },
     });
-    const response = await session.sendAndWait({ prompt }, 120_000);
+    const response = await session.sendAndWait({ prompt }, timeoutMs);
     if (typeof response?.data?.content !== "string") throw new ResponseError("empty_response");
     return response.data.content;
   } catch (error) {
     if (error instanceof ResponseError) throw error;
-    throw new AnalysisError();
+    throw new AnalysisError(error?.name === "TimeoutError" || error?.code === "ETIMEDOUT" ||
+      (typeof error?.message === "string" && /timeout|timed out/i.test(error.message)) ? "timeout" : "sdk_failure");
   } finally {
     try {
       try {

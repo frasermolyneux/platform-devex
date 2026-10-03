@@ -156,6 +156,11 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   Correlated locations/rules alone are not semantic proof. Reject malformed plans explicitly.
   Keep one active batch per repository and human final merge; never start another to meet
   a daily throughput target or reset existing repair/review budgets.
+- Keep no-tool SDK intake explicitly planning-only: supplied source/configuration and
+  controller metadata support estimates, not fabricated execution. Implementation, clean-tree
+  reports and actual tests/CI belong to later stages. One malformed-protocol retry is allowed
+  on unchanged default-branch/batch state; never reroll a valid skip/risk veto or an SDK error.
+  Recheck source SHA and active batches before issue creation; log only safe failure categories.
 - New batch issues carry the `platform-devex-ci` label in addition to their body marker; query
   this label when locating open/closed batches so unrelated issues in the same repository do not
   exhaust pagination. Do not remove the label from an in-progress issue.

@@ -23,13 +23,17 @@ import {
   validateProposal,
 } from "./continuous-improvement.mjs";
 
-function assertTestingInstructions(text) {
+function assertCoverageRequirements(text) {
   assert.match(text, /Add or extend focused unit\/regression tests/);
   assert.match(text, /integration tests when affected behavior crosses/);
   assert.match(text, /Playwright tests for affected user-facing journeys when the repository uses Playwright/);
   assert.match(text, /backend-only changes do not require browser tests/);
   assert.match(text, /Use existing test frameworks and patterns/);
   assert.match(text, /identify the exact tests and explain why additions are unnecessary/);
+}
+
+function assertTestingInstructions(text) {
+  assertCoverageRequirements(text);
   assert.match(text, /PR description, record added\/updated test paths, commands, pass\/fail outcomes/);
   assert.match(text, /stop for human guidance; never omit required coverage to meet the size limit/);
   assert.match(text, /targeted tests may live in separate test directories/);
@@ -385,17 +389,23 @@ test("SDK impact analysis has no tools and validates its response", async () => 
           assert.equal(config.sessionLimits.maxAiCredits, 30);
           assert.equal(config.gitHubToken, "test-human");
           return {
-            sendAndWait: async (message) => {
+            sendAndWait: async (message, timeoutMs) => {
+              assert.equal(timeoutMs, 240_000);
               assert.equal(message.responseSchema, undefined);
               assert.match(message.prompt, /alertIds \(array of IDs\)/);
-              assertTestingInstructions(message.prompt);
-              return { data: { content: '{"decision":"skip"}' } };
+              assertCoverageRequirements(message.prompt);
+              assert.match(message.prompt, /READ-ONLY INTAKE PLANNER/);
+              assert.match(message.prompt, /Lack of shell\/repository tools.*NOT a reason to skip planning/);
+              assert.match(message.prompt, /FUTURE IMPLEMENTER/);
+              assert.doesNotMatch(message.prompt, /platform-devex-ci-evidence|committed clean tree|patch_committed/);
+              return { data: { content: '{"decision":"skip","rationale":"No bounded safe fix in these excerpts"}' } };
             },
           };
         },
         stop: async () => {},
       };
     });
+
     assert.equal(result.decision, "skip");
     await assert.rejects(access(baseDirectory), { code: "ENOENT" });
   } finally {
@@ -405,6 +415,47 @@ test("SDK impact analysis has no tools and validates its response", async () => 
     else process.env.COPILOT_AGENT_PAT = oldPat;
     if (oldSonarToken === undefined) delete process.env.SONAR_TOKEN;
     else process.env.SONAR_TOKEN = oldSonarToken;
+  }
+});
+
+test("intake retries only malformed protocol on unchanged input, never valid skips or transport errors", async () => {
+  const previous = process.env.COPILOT_AGENT_PAT;
+  process.env.COPILOT_AGENT_PAT = "test-human";
+  const skip = '{"decision":"skip","rationale":"Genuine uncertainty in the supplied data"}';
+  const veto = JSON.stringify({ decision: "propose", risk: "high", title: "Risky fix", rationale: "Requires architecture changes",
+    alertIds: ["sonarcloud:A"], tests: ["dotnet test"],
+    cohesion: { kind: "single-finding", summary: "Unsafe change",
+      members: [{ alertId: "sonarcloud:A", change: "Requires human review" }] },
+    estimates: { nonTest: { files: 1, lines: 10 }, tests: { files: 1, lines: 10 } } });
+  try {
+    for (const scenario of ["retry", "changed", "valid-skip", "valid-veto", "transport", "twice-invalid"]) {
+      let calls = 0;
+      let stateChecks = 0;
+      const factory = async () => ({
+        createSession: async () => ({ sendAndWait: async ({ prompt }) => {
+          calls++;
+          if (calls === 2) assert.match(prompt, /SAME planning input/);
+          if (scenario === "transport") throw new Error("SECRET_PRIVATE timeout");
+          const content = scenario === "valid-veto" ? veto :
+            scenario === "valid-skip" || (calls === 2 && scenario === "retry")
+              ? skip : `\`\`\`json\n${skip}\n\`\`\``;
+          return { data: { content } };
+        } }),
+        stop: async () => {},
+      });
+      const run = () => analyze([], factory, {}, async () => {
+        stateChecks++; return scenario !== "changed";
+      });
+      if (["retry", "valid-skip"].includes(scenario)) assert.equal((await run()).decision, "skip");
+      else if (scenario === "valid-veto") assert.equal((await run()).risk, "high");
+      else await assert.rejects(run(), scenario === "changed" ? /state_changed/ :
+        scenario === "transport" ? /analysis failed \(timeout\)/ : /invalid_json/);
+      assert.equal(calls, ["retry", "twice-invalid"].includes(scenario) ? 2 : 1, scenario);
+      assert.equal(stateChecks, ["retry", "changed", "twice-invalid"].includes(scenario) ? 1 : 0, scenario);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.COPILOT_AGENT_PAT;
+    else process.env.COPILOT_AGENT_PAT = previous;
   }
 });
 

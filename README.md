@@ -71,6 +71,14 @@ scanner/rule; different rules require a shared root cause in the same file. A co
 rule/directory/file alone is not proof of a relationship or a reason to fill a four-item quota.
 Issues record the relationship and separate non-test/test file and line estimates;
 invalid proposals are reported as errors rather than disguised as "no improvements".
+The no-tool SDK intake is explicitly a planner: it estimates a feasible fix/coverage plan
+from supplied excerpts and controller-collected metadata, not implementation or executed
+test proof. Actual execution remains the later agent/controller's responsibility.
+Intake allows one strict JSON-protocol retry on unchanged input after confirming the
+default-branch SHA and absence of an active batch; valid skips, risk vetoes and SDK failures
+are not rerolled. Its SDK wait is bounded to four minutes; other analyses retain two minutes,
+and errors expose only safe categories/byte counts. Branch/batch state is rechecked before
+creating an issue, so a stale plan cannot create another active batch.
 Critical/blocker alerts, CI/infrastructure/auth changes and uncertain behavior remain for a
 human. The shared `bounded-test-budget-v1` policy in `scripts/change-scope.mjs` allows:
 
