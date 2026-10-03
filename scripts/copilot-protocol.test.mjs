@@ -86,8 +86,11 @@ test("restricted SDK isolation strips credentials and cleans its temporary direc
       },
       stop: async () => { throw new Error("stop failed"); },
     };
-  } }), /stop failed/);
+  } }), /Copilot SDK analysis failed/);
   await assert.rejects(access(directory), { code: "ENOENT" });
+  await assert.rejects(runReadOnlyAnalysis("data", { token: "test-human",
+    createClient: async () => { throw new Error("SECRET_PRIVATE transport details"); } }), (error) =>
+      error.message.includes("credentials withheld") && !error.message.includes("SECRET_PRIVATE"));
 });
 
 test("evidence is current-head and trusted-author only, preserves description content and validates real outcome types", () => {
@@ -135,6 +138,28 @@ test("thread verification requires complete per-ID decisions and affirmative cov
     await assert.rejects(verifyReviewThreads(context, async () => JSON.stringify(invalid)), /invalid_schema/);
   }
   await assert.rejects(verifyReviewThreads({ threads: [] }, async () => '{"threads":[]}'), /invalid_schema/);
+});
+
+test("review verification diagnoses schema fields safely, bounds prose, and retries only invalid protocol on unchanged state", async () => {
+  let calls = 0;
+  const valid = { coverage: { decision: "verified", reason: "Specific discoverable assertion" }, threads: [] };
+  const recovered = await verifyReviewThreads({ threads: [] }, async (prompt) => {
+    calls++;
+    assert.match(prompt, /hard maximum 1000/);
+    return JSON.stringify(calls === 1 ? { ...valid, coverage: { ...valid.coverage, reason: "x".repeat(1001) } } : valid);
+  });
+  assert.deepEqual(recovered, valid);
+  assert.equal(calls, 2);
+  await assert.rejects(verifyReviewThreads({ threads: [] }, async () =>
+    JSON.stringify({ ...valid, coverage: { decision: "verified", reason: "" } })), /invalid_schema_coverage_reason/);
+  calls = 0;
+  await assert.rejects(verifyReviewThreads({ threads: [] }, async () => { calls++; return "{}"; },
+    async () => false), /state_changed/);
+  assert.equal(calls, 1);
+  calls = 0;
+  const human = { ...valid, coverage: { decision: "human", reason: "Actual testing blocker" } };
+  assert.deepEqual(await verifyReviewThreads({ threads: [] }, async () => { calls++; return JSON.stringify(human); }), human);
+  assert.equal(calls, 1);
 });
 
 function auditFixture() {

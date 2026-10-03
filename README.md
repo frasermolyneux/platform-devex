@@ -112,7 +112,8 @@ results verbatim; publication is not independent test execution. Missing reports
 metadata-only request per head, outside the code-fix budget, with a 48-hour timeout.
 A no-tool SDK verification compares every unresolved Copilot conversation (including outdated
 and old-commit conversations) against the current source, full patch, test wiring and reported
-execution. It independently assesses coverage even with no conversations. Only affirmatively
+execution. Its bounded schema includes per-field safe diagnostics and one protocol-only retry
+after state revalidation; a valid finding is never rerolled. It independently assesses coverage even with no conversations. Only affirmatively
 verified findings are resolved, using the human PAT; uncertain findings escalate, bounded
 defects get a specific repair request, and human/mixed conversations remain untouched and block
 handoff. Description repairs and thread resolutions require another completed Copilot review,

@@ -1104,7 +1104,10 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     .map((comment) => readMarker(comment.body, VERIFICATION_TAG))
     .findLast((record) => record?.sha === sha && record.key === key);
   if (!verification) {
-    verification = await verifyThreads(context, (prompt) => runReadOnlyAnalysis(prompt, { token: human.token }));
+    verification = await verifyThreads(context, (prompt) => runReadOnlyAnalysis(prompt, { token: human.token }),
+      async () => Boolean(await currentSnapshot(app, repo, issue, pr, human.login)) &&
+        await evidenceStillCurrent(app, repo, pr.number, evidence) &&
+        fingerprint(await reviewThreads(app, repo, pr.number)) === fingerprint(threads));
     if (!validateThreadDecisions(verification, findings)) throw new Error("Incomplete or invalid review-thread verification");
     if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
     if (!await evidenceStillCurrent(app, repo, pr.number, evidence)) {

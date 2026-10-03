@@ -10,6 +10,12 @@ export class ResponseError extends Error {
   }
 }
 
+export class AnalysisError extends Error {
+  constructor() {
+    super("Copilot SDK analysis failed; response and credentials withheld");
+  }
+}
+
 export function parseObjectResponse(text, validate = () => true) {
   const bytes = typeof text === "string" ? Buffer.byteLength(text) : 0;
   if (!bytes || !text.trim()) throw new ResponseError("empty_response", bytes);
@@ -74,11 +80,18 @@ export async function runReadOnlyAnalysis(prompt, {
     const response = await session.sendAndWait({ prompt }, 120_000);
     if (typeof response?.data?.content !== "string") throw new ResponseError("empty_response");
     return response.data.content;
+  } catch (error) {
+    if (error instanceof ResponseError) throw error;
+    throw new AnalysisError();
   } finally {
     try {
-      if (client) await client.stop();
-    } finally {
-      await rm(baseDirectory, { recursive: true, force: true });
+      try {
+        if (client) await client.stop();
+      } finally {
+        await rm(baseDirectory, { recursive: true, force: true });
+      }
+    } catch {
+      throw new AnalysisError();
     }
   }
 }
