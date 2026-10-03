@@ -48,7 +48,8 @@ export function evidenceReport(comments, sha, humanLogin) {
 function agentReportData(comment) {
   const body = comment.body.split("\n").filter((line) => !/^\s*>/.test(line)).join("\n").trim();
   const wrapped = body.match(new RegExp(`^<!-- ${EVIDENCE_TAG}:(\\{[^\\n]*\\}) -->$`));
-  return parseObjectResponse(wrapped ? wrapped[1] : body);
+  const fenced = body.match(/^```(?:json)?[ \t]*\r?\n([\s\S]*)\r?\n```$/i);
+  return parseObjectResponse(wrapped?.[1] ?? fenced?.[1] ?? body);
 }
 
 export function agentEvidenceCandidate(comments, sha) {
@@ -61,7 +62,7 @@ export function agentEvidenceCandidate(comments, sha) {
       return heads.length > 0 && heads.every((head) => head === sha);
     } catch (error) {
       if (!(error instanceof ResponseError)) throw error;
-      if (/^(?:\{|\[|<!-- platform-devex-ci-evidence:)/.test(body)) return false;
+      if (/^(?:\{|\[|```|<!-- platform-devex-ci-evidence:)/.test(body)) return false;
       const escaped = sha.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       return new RegExp(`(?:^|\\n)\\s*(?:HEAD|commit(?:_sha| SHA)?)[\\s:=\`]+${escaped}(?=[\\s\`.,;]|$)`, "i").test(body);
     }
@@ -128,12 +129,14 @@ export function structuredAgentEvidence(comment, sha, changedPaths) {
   const commands = [];
   for (const test of tests) {
     if (!test || !text(test.path, 1000) || !text(test.command, 1000) || !text(test.result)) return null;
-    const relative = changedPaths.find((file) => test.path === file || test.path.endsWith(`/${file}`)) ??
-      (path(test.path) ? test.path : null);
+    const describedPaths = test.path.split(";").map((value) =>
+      value.trim().replace(/\s+\(limited to [^()]+\)$/, ""));
+    const relativePaths = describedPaths.map((value) =>
+      changedPaths.find((file) => value === file || value.endsWith(`/${file}`)) ?? (path(value) ? value : null));
     const passed = /^\s*pass(?:ed)?\b/i.test(test.result);
     const failed = /^\s*fail(?:ed)?\b/i.test(test.result) || /\b[1-9]\d*\s+failed\b/i.test(test.result);
-    if (!relative || (!passed && !failed)) return null;
-    testPaths.push(relative);
+    if (relativePaths.some((value) => !value) || (!passed && !failed)) return null;
+    testPaths.push(...relativePaths);
     commands.push({ command: test.command, outcome: failed ? "failed" : "passed", details: test.result });
   }
   const declaredPaths = Array.isArray(data.testPaths) && data.testPaths.length && data.testPaths.every(path)

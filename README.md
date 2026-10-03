@@ -118,7 +118,8 @@ auto-closing reference to the batch issue, the controller changes it to `Refs #.
 issue stays open through post-merge verification. The controller publishes an authenticated,
 current-head test report into a dedicated PR description section, preserving other description
 content. Known structured coding-agent reports are adapted deterministically, including
-reports wrapped in the evidence marker with the known legacy shape; conflicting head
+reports wrapped in the evidence marker with the known legacy shape or a single JSON code
+fence, and explicitly listed multi-file formatting scopes; conflicting head
 declarations or malformed canonical commands are never reinterpreted as success. Unfamiliar
 reports can use restricted SDK normalization. Both must copy reported commands and
 results verbatim; publication is not independent test execution. Missing reports receive one

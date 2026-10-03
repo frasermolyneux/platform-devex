@@ -62,6 +62,24 @@ test("known factual report shapes inside an evidence marker adapt without invent
   }
 });
 
+test("authored reports may contain one JSON fence and explicit multi-file/format-scope descriptors, without relaxing SDK business JSON", () => {
+  const payload = {
+    commit_sha: "abcd", coverage: report.layers,
+    tests: [
+      { path: "src/a.test.js; src/a.js", command: "node --test src/a.test.js", result: "PASS: 1 passed, 0 failed" },
+      { path: "src/project.slnx (limited to a.test.js)", command: "dotnet format src/project.slnx", result: "PASS" },
+    ],
+  };
+  const source = { ...comment, body: `> old request\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`` };
+  assert.equal(agentEvidenceCandidate([source], "abcd"), source);
+  const adapted = structuredAgentEvidence(source, "abcd", ["src/a.test.js", "src/a.js"]);
+  assert.deepEqual(adapted.report.testPaths, ["src/a.test.js", "src/a.js", "src/project.slnx"]);
+  assert.deepEqual(adapted.report.commands.map((command) => command.command), payload.tests.map((test) => test.command));
+  assert.throws(() => parseObjectResponse(source.body), ResponseError);
+  const malformed = { ...source, body: `${source.body}\n\`\`\`json\n{"commit_sha":"abcd"}\n\`\`\`` };
+  assert.equal(agentEvidenceCandidate([malformed], "abcd"), null);
+});
+
 test("business JSON framing rejects prose, fences, multiple values, wrong types and duplicate/escaped keys", () => {
   for (const text of ["", "  ", "SECRET_PRIVATE prose", "```json\n{}\n```", "{}\n{}", "[]", "null",
     JSON.stringify({ ...approved, touches_ci: "false" }), JSON.stringify({ ...approved, extra: true }),
