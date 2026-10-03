@@ -94,10 +94,12 @@ triggers repositories whose validation workflows skip drafts but run on `ready_f
 Skipped-only checks and Copilot's own agent/review jobs do not count as passing validation.
 When SonarCloud is enabled, human handoff requires **zero new PR findings**, including INFO
 analyzer diagnostics in added tests, not merely a passing quality gate. PR analysis must be
-current and complete; introduced findings use the existing bounded repair budget or escalate.
+current (matching the exact PR head SHA), complete and unchanged throughout paging;
+introduced findings use the existing bounded repair budget or escalate.
 Never suppress diagnostics or drop required tests to fit the cap; narrow the batch instead.
 An earlier handoff is explicitly withdrawn when its head changes, its batch escalates, or
-new findings/unavailable quality validation invalidate it.
+new findings/unavailable quality validation invalidate it. Handoffs made before the strict
+Sonar policy are withdrawn even while replacement validation is pending.
 Cancelled checks are handled as orchestration failures, not requests for code changes: the
 controller retries only the latest current-head workflow event that was already released by
 the trusted App, using that repository's App token. Retries are capped at two per run/head,

@@ -855,13 +855,22 @@ function mockImprovementPr() {
       if (path.startsWith("/api/components/show")) return Response.json({ component: {
         key: "owner_repo", qualifier: "TRK", organization: "owner", analysisDate: now,
       } });
-      if (path.startsWith("/api/project_pull_requests/list")) return Response.json({ pullRequests: [
-        { key: "8", analysisDate: state.sonarAnalysisDate, commit: { sha: state.sonarAnalysisSha ?? state.pr.head.sha } },
-      ] });
-      if (path.startsWith("/api/issues/search")) return Response.json({
-        total: state.sonarTotal ?? state.sonarFindings.length,
-        paging: { pageIndex: 1, pageSize: 500 }, issues: state.sonarFindings,
-      });
+      if (path.startsWith("/api/project_pull_requests/list")) {
+        state.sonarMetadataCalls = (state.sonarMetadataCalls ?? 0) + 1;
+        state.onSonarMetadata?.(state.sonarMetadataCalls);
+        return Response.json({ pullRequests: [
+          { key: "8", analysisDate: state.sonarAnalysisDate,
+            commit: state.sonarCommit === undefined ? { sha: state.sonarAnalysisSha ?? state.pr.head.sha } : state.sonarCommit },
+        ] });
+      }
+      if (path.startsWith("/api/issues/search")) {
+        const page = Number(new URL(url).searchParams.get("p"));
+        return Response.json({
+          total: state.sonarTotal ?? state.sonarFindings.length,
+          paging: { pageIndex: page, pageSize: 500 },
+          issues: state.sonarFindings.slice((page - 1) * 500, page * 500),
+        });
+      }
       assert.fail(`unexpected Sonar endpoint: ${path}`);
     }
     if (init.method !== "GET") {
@@ -1521,7 +1530,7 @@ test("a PR already handed off does not escalate just because a human has not yet
     state.reviews.push({ user: { login: "copilot-pull-request-reviewer[bot]" },
       commit_id: "abcd", state: "COMMENTED" });
     state.issueComments.push({ user: { login: "app[bot]" },
-      body: "<!-- platform-devex-ci-ready:abcd -->" });
+      body: "<!-- platform-devex-ci-ready:abcd -->\n<!-- platform-devex-ci-sonar-zero-v1:abcd -->" });
     await run();
     assert.equal(state.writes.length, 1);
     assert.doesNotMatch(state.writes[0].body.body, /needs human attention/);
@@ -1806,5 +1815,73 @@ test("quality dry-runs remain read-only even with findings and an existing hando
     state.issueComments.push({ id: 77, user: { login: "app[bot]" }, body: "<!-- platform-devex-ci-ready:abcd -->" });
     await run("true");
     assert.equal(state.writes.length, 0);
+  } finally { restore(); }
+});
+
+test("legacy handoffs are withdrawn before waiting for pending checks under the stricter quality policy", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.checks.check_runs[0].status = "in_progress";
+    state.checks.check_runs[0].conclusion = null;
+    state.issueComments.push({ id: 77, user: { login: "app[bot]" },
+      body: "<!-- platform-devex-ci-ready:abcd -->\nPreviously ready" });
+    await run();
+    assert.match(state.issueComments[0].body, /^<!-- platform-devex-ci-handoff-withdrawn -->/);
+    assert.match(state.issueComments[0].body, /zero-new-Sonar-finding policy/);
+    assert.equal(state.writes.length, 1);
+    assert.equal(state.sonarMetadataCalls, undefined);
+  } finally { restore(); }
+});
+
+test("missing exact Sonar commit metadata fails closed instead of trusting a fresh analysis date", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.sonarCommit = null;
+    await assert.rejects(run(), /current SonarCloud PR analysis is unavailable/);
+    assert.equal(state.writes.length, 0);
+    assert.equal(state.verificationCalls, 0);
+  } finally { restore(); }
+});
+
+test("an analysis changing between issue pages and final metadata invalidates the whole Sonar snapshot", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.sonarFindings = Array.from({ length: 501 }, (_, index) => ({ ...sonarInfo(), key: `new-${index}` }));
+    state.onSonarMetadata = (call) => {
+      if (call === 2) state.sonarAnalysisDate = new Date(Date.now() + 60_000).toISOString();
+    };
+    await assert.rejects(run(), /analysis changed during paging/);
+    assert.equal(state.writes.length, 0);
+    assert.equal(state.verificationCalls, 0);
+  } finally { restore(); }
+});
+
+test("a large finding set waits for the existing owner-authorized same-head repair without duplicate delegation or escalation", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.sonarFindings = Array.from({ length: 17 }, (_, index) => ({ ...sonarInfo(), key: `new-${index}` }));
+    state.prComments.push({ user: { login: "owner" }, created_at: new Date().toISOString(),
+      body: "<!-- platform-devex-ci-fix:abcd -->\nOwner-authorized bounded cleanup" });
+    await run();
+    assert.equal(state.writes.length, 0);
+    assert.equal(state.verificationCalls, 0);
+  } finally { restore(); }
+});
+
+test("quality validation disappearing during SDK verification withdraws a previously valid strict-policy handoff", async () => {
+  const { state, run, restore } = mockImprovementPr();
+  try {
+    greenReviewed(state);
+    state.issueComments.push({ id: 77, user: { login: "app[bot]" },
+      body: "<!-- platform-devex-ci-ready:abcd -->\n<!-- platform-devex-ci-sonar-zero-v1:abcd -->" });
+    state.onVerify = () => { state.sonarCommit = null; };
+    await assert.rejects(run(), /current SonarCloud PR analysis is unavailable/);
+    assert.equal(state.verificationCalls, 1);
+    assert.match(state.issueComments[0].body, /^<!-- platform-devex-ci-handoff-withdrawn -->/);
+    assert.match(state.issueComments[0].body, /final complete SonarCloud PR validation is unavailable/);
   } finally { restore(); }
 });

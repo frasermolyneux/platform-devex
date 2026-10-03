@@ -277,9 +277,9 @@ async function sonarcloudAlerts(repo, branch, token, pullRequest) {
   let analysisSha;
   if (pullRequest) {
     const pulls = (await request(`/api/project_pull_requests/list?project=${encodeURIComponent(projectKey)}`)).pullRequests;
-    const analysis = pulls?.find((item) => item.key === String(pullRequest));
+    const analysis = Array.isArray(pulls) ? pulls.find((item) => item.key === String(pullRequest)) : undefined;
     if (!Array.isArray(pulls) || !Number.isFinite(Date.parse(analysis?.analysisDate)) ||
-        typeof analysis.commit?.sha !== "string") {
+        typeof analysis?.commit?.sha !== "string") {
       throw new Error(`${repo}#${pullRequest}: current SonarCloud PR analysis is unavailable`);
     }
     analysisDate = analysis.analysisDate;
@@ -323,7 +323,7 @@ async function sonarcloudAlerts(repo, branch, token, pullRequest) {
     if (page * 500 >= total) {
       if (pullRequest) {
         const pulls = (await request(`/api/project_pull_requests/list?project=${encodeURIComponent(projectKey)}`)).pullRequests;
-        const current = pulls?.find((item) => item.key === String(pullRequest));
+        const current = Array.isArray(pulls) ? pulls.find((item) => item.key === String(pullRequest)) : undefined;
         if (current?.commit?.sha !== analysisSha || current.analysisDate !== analysisDate) {
           throw new Error(`${repo}#${pullRequest}: SonarCloud PR analysis changed during paging`);
         }
@@ -531,7 +531,7 @@ async function findPullRequest(api, repo, issueNumber) {
   return null;
 }
 
-async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dryRun, appLogin) {
+async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dryRun, appLogin, sonarVerified) {
   const marker = `${READY_MARKER}${sha} -->`;
   if ((await comments(api, repo, issue.number)).some((item) =>
     item.user?.login === appLogin && item.body?.startsWith(marker))) return;
@@ -540,6 +540,7 @@ async function readyComment(api, repo, issue, batch, pr, sha, files, checks, dry
     method: "POST",
     body: { body: [
       marker, `PR #${pr.number} is ready for **human** review and merge.`,
+      ...(sonarVerified ? [`<!-- platform-devex-ci-sonar-zero-v1:${sha} -->\nSonarCloud's complete current-head PR analysis has zero new findings, including INFO diagnostics.`] : []),
       `Findings: ${batch.alertIds.join(", ")}`,
       `Changed files: ${files.map((file) => clean(file.filename)).join(", ")}`,
       `Passing checks: ${checks.check_runs.filter((run) => run.conclusion === "success" && !["copilot", COPILOT_REVIEW_CHECK].includes(run.name)).map((run) => clean(run.name)).join(", ") || "commit statuses only"}`,
@@ -969,6 +970,11 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
       comment.body?.startsWith(READY_MARKER) && !comment.body.startsWith(`${READY_MARKER}${sha} -->`))) {
     await withdrawHandoffs(app, repo, issue, appLogin, "the PR head changed and must be verified again", dryRun);
   }
+  if (enabledSources.includes("sonarcloud") && existing.some((comment) =>
+    comment.user?.login === appLogin && comment.body?.startsWith(READY_MARKER) &&
+    !comment.body.includes(`<!-- platform-devex-ci-sonar-zero-v1:${sha} -->`))) {
+    await withdrawHandoffs(app, repo, issue, appLogin, "the earlier handoff was not verified under the zero-new-Sonar-finding policy", dryRun);
+  }
   const prComments = await comments(app, repo, pr.number);
   if (prComments.some((comment) => comment.user?.login === human.login &&
       comment.body?.includes("<!-- devex-copilot-delegate-escalated -->"))) {
@@ -1044,6 +1050,11 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
       if (!await currentSnapshot(app, repo, issue, pr, human.login)) return;
       await withdrawHandoffs(app, repo, issue, appLogin, `${newFindings.length} new SonarCloud findings remain, including INFO diagnostics`, dryRun);
       if (newFindings.length > MAX_CONTEXT) {
+        if (prComments.some((comment) => comment.user?.login === human.login &&
+            comment.body?.includes(`${FIX_MARKER}${sha} -->`))) {
+          await requestCodeRepair(app, human, repo, issue, pr, prComments, [], dryRun, appLogin);
+          return;
+        }
         await escalate(app, repo, issue, `PR #${pr.number} introduces ${newFindings.length} SonarCloud findings; bounded cleanup needs human guidance`, dryRun, appLogin);
         return;
       }
@@ -1287,7 +1298,8 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     }
   }
   if (!await currentSnapshot(app, repo, issue, latest, human.login)) return;
-  await readyComment(app, repo, issue, batch, latest, sha, files, finalChecks, dryRun, appLogin);
+  await readyComment(app, repo, issue, batch, latest, sha, files, finalChecks, dryRun, appLogin,
+    enabledSources.includes("sonarcloud"));
 }
 
 export async function analyze(alerts, createClient, testing = {}) {
