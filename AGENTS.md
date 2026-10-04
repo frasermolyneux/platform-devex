@@ -214,3 +214,5 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
 ## Authoritative repository docs
 
 - `README.md`
+- `docs/plans/estate-analysis-alignment.md` - planned estate-wide analysis migration; not the
+  current runtime contract until implemented.
