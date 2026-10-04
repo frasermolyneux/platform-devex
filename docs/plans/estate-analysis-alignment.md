@@ -240,8 +240,18 @@ unrelated secrets into scanner/build jobs or use blanket secret inheritance.
 
 Before changing merge authentication, put explicit guards on every newly reachable deployment,
 Terraform, release/tag, image/package publication and downstream `workflow_run` path. Classify
-the actual verified merge origin; a branch name, label, commit message or arbitrary bot actor
+the actual verified original run actor; a branch name, label, commit message or arbitrary bot actor
 is not authorization. Unknown origin must hold privileged publication for human attention.
+
+The approved human publication policy trusts the original authenticated human push actor
+when their immutable identity has current repository write/maintain/admin permission.
+A historical PR merger is not an additional human gate: legitimate tag releases and
+authorized pushes of existing commits retain publication eligibility. This does not grant
+new publication routes or change any existing branch, environment, check or release gates.
+Bot publication exceptions retain exact PR/merge-actor binding. A human rerun never replaces
+an original bot actor, and human final merge for improvement PRs remains required.
+Do not infer the original push reference from today's tags/branches; downstream metadata
+cannot prove that history. No OIDC permission or signed-original-event scheme is introduced.
 
 The preservation rule is: new App-authenticated automatic dependency merges receive ordinary
 post-merge analysis/validation but do not gain production/development deployments, Terraform
