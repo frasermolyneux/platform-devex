@@ -4,6 +4,14 @@ Internal developer platform automation: separate maintenance workflows for PR br
 Copilot delegation and trusted pending workflow runs, plus opt-in continuous improvement across
 frasermolyneux repositories.
 
+## Estate analysis alignment
+
+[The end-to-end alignment plan](docs/plans/estate-analysis-alignment.md) covers repository-owned
+security/quality analysis across the `platform-workloads` catalog, excluding `xi-*` and
+uncatalogued repositories. It includes scanner profiles, App-authenticated dependency merges
+with deployment/release behavior protection, estate-wide rollout, documentation updates and
+complete retirement of obsolete approaches. This is a plan, not implemented runtime behavior.
+
 ## What it does
 
 Three independent workflows run every 30 minutes on staggered schedules, or on demand via
