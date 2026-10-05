@@ -30,7 +30,7 @@ branch were retired **without merge**, leaving its default branch unchanged.
 
 This is backend acceptance, not a production pilot or partial estate adoption.
 Every result explicitly retains `fullProfileEvidence: false`. Production CodeQL integration,
-Sonar/build/coverage import, authenticated freshness reuse, catalog projection,
+Sonar/build/coverage import, authenticated freshness reuse, catalog-governed caller activation,
 publication guards, all applicable default callers, consumption and retirement remain
 outstanding. No App dependency-merge identity or Sonar Automatic Analysis cutover has occurred.
 
@@ -46,13 +46,17 @@ Python, Bandit and public CodeQL Python, without rewriting the original before-s
 
 ### Verified native-analysis and prerequisite progress
 
-The [six-family CodeQL execution](https://github.com/frasermolyneux/actions/actions/runs/37323486404)
+The [current-candidate six-family CodeQL execution](https://github.com/frasermolyneux/actions/actions/runs/37344365578)
 completed actual Actions, JavaScript, Python, SDK .NET, Windows .NET Framework and C++
 extraction and queries. Maintained public source passed independent native processing;
 compiled fixtures did not publish source databases or native findings. Archived source is
 bound to the originating checkout, including a shared archive root. Raw SARIF result counts
 include diagnostics and are not native security-alert counts. This remains integration
 acceptance, not a released production CodeQL engine or a complete repository profile.
+Its actual PR-merge source is `79e15ede9acb26782cdbfb5489eaa5128e1f31b7`,
+not the logical candidate head. All nine extraction/native proofs were independently
+checked; the three maintained-language native analyses have zero findings. Earlier
+candidate evidence is retained under its own source/run identity, not relabeled.
 
 `frasermolyneux/actions#46` contains the Sonar candidate and these integration contracts.
 It is not yet merged or released. Actual scanner/build execution and source/origin/coverage
@@ -70,6 +74,35 @@ applied exactly two additions, zero changes and zero destroys; both Actions and 
 recovered an initial transient GitHub OIDC refresh failure. This prerequisite does not
 represent full catalog projection or Sonar cutover.
 
+### Deployed and verified catalog policy
+
+`frasermolyneux/platform-workloads#219` normally merged at
+`7b0a3689866a2901cacc9ecb5bdd795029ddeb64` after complete exact-head Copilot review
+with no findings and both full production plans showing exactly the intended effects.
+All 50 scoped catalog rows now declare their source profile or maintained exemption.
+The [actual production apply](https://github.com/frasermolyneux/platform-workloads/actions/runs/37344158008)
+added exactly 142 non-secret analysis variables and one built-in metadata contract:
+143 additions, zero changes, zero destruction.
+
+Independent live reads verified all 142 variable values across all 46 applicable
+repositories against the catalog, unchanged public/private visibility, and all seven
+private publication boundaries. The four exemptions and excluded `xi-*` rows receive
+no analysis-variable writes. Existing catalog fields and policy-only lifecycle ownership
+are preserved; no Azure, ruleset, credential or provider-method change occurred.
+Repository configuration and contributor/developer documentation are updated, and the
+complete metadata-only native catalog contract runs in CI.
+
+A documentation push exposed the existing PR workflow's cancellation of a running
+Terraform plan, leaving its lease orphaned. The operator explicitly approved exact-ID
+recovery after the owning job and other writers stopped. Native Terraform unlocked only
+that lease; running PR plans now finish and release locks normally while retaining shared
+production serialization. Subsequent exact-head plans and the actual apply succeeded.
+
+This completes catalog configuration projection, **not scanner caller rollout**.
+Shared production CodeQL/Sonar integration, freshness reuse, publication guards,
+all default callers, consumer migration and obsolete-provider retirement remain
+outstanding. No Sonar Automatic Analysis or dependency-merge identity cutover is claimed.
+
 ## 1. Scope and authority
 
 Use the catalog loaded by `platform-workloads/terraform/workloads.load.tf`, not a public
@@ -78,8 +111,8 @@ GitHub repository listing or `platform-devex`'s continuous-improvement opt-in li
 The original before-state catalog revision is
 `33e31f3c9459403b561b64d2a44edd287260b850`. It contains 61 non-example definitions:
 50 are in scope and 11 have the excluded `xi-` prefix.
-The broker prerequisite advanced catalog main to
-`e39df01a65725f9aaf9a667ae07705e3ba1bb8c6` without changing this scope; retain the
+The broker prerequisite and deployed policy advanced catalog main to
+`7b0a3689866a2901cacc9ecb5bdd795029ddeb64` without changing this scope; retain the
 original snapshot rather than relabeling it as the new revision.
 
 Scope includes both lifecycle-managed repositories and cataloged, policy-managed repositories
