@@ -371,7 +371,8 @@ pretend its echo-only build is application validation.
 
 For SDK-style .NET tests, retain the original solution and unit-test filter and select
 the pinned native `dotnet-coverage` collector where needed without changing test-project
-dependencies. Native Cobertura has a supported `sonar.cs.cobertura.reportsPaths` import;
+dependencies. Sonar's [official dotnet-coverage examples](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/test-coverage/dotnet-test-coverage#dotnetcoverage)
+document native Cobertura import through `sonar.cs.cobertura.reportsPaths`;
 collection alone still is not completed Sonar import evidence. Travel Itinerary's tests
 outside `src` are included by its solution. Preserve Portal Web's existing runsettings
 and separate integration/browser behavior. Missing tests or unsupported coverage need
