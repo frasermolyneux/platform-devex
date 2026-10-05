@@ -9,6 +9,41 @@ and no remaining migration adapters or obsolete analysis configuration.
 This is one estate-wide migration, not a pilot or an opt-in experiment. Dependency ordering
 and bounded deployment concurrency do not reduce the final repository scope.
 
+### Verified shared-backend milestone
+
+The selected-local backend is released, not the full estate implementation.
+`frasermolyneux/actions#44` normally merged at
+`2e388b178cf570c33177a0a875cd65ecd5ee2001` after passing exact-head checks and the
+complete Copilot review, including previously-missed findings. Published immutable
+packages are `repository-analysis/v1.0.0`, `repository-analysis-local/v1.1.0`,
+`repository-analysis-sarif/v1.0.1` and `repository-analysis-state/v1.0.1`.
+
+The [merged-head public execution](https://github.com/frasermolyneux/actions/actions/runs/37292665701)
+completed all four selected local tools and their actual GitHub native processing.
+All six pinned analyzers also passed genuine hosted fixtures. A real private
+different-repository caller successfully used the immutable released reusable workflow:
+all five selected tools, positive source coverage, foreign-definition/current-source/run
+binding and the returned private aggregate passed. Native publishing was genuinely skipped;
+the separate live-private denial produced the exact expected policy error. Detailed private
+reports remain in their origin, not this public plan. The temporary acceptance draft and
+branch were retired **without merge**, leaving its default branch unchanged.
+
+This is backend acceptance, not a production pilot or partial estate adoption.
+Every result explicitly retains `fullProfileEvidence: false`. Full CodeQL language
+execution, Sonar/build/coverage import, authenticated freshness reuse, catalog projection,
+publication guards, all applicable default callers, consumption and retirement remain
+outstanding. No App dependency-merge identity or Sonar Automatic Analysis cutover has occurred.
+
+The owner approved a temporary **lint-only** compatibility adapter for released
+actionlint 1.7.12, which cannot parse GitHub's commit-bound `$/` references. It preserves
+the checksum-pinned released linter, normal rules, diagnostics and failures; only supported
+literal metadata references are translated in an isolated copy. It is not a runtime or
+legacy-caller migration fallback. The shared Actions linting documentation owns its removal
+condition: adopt a checksum-pinned released parser with native support and equivalent
+positive/negative/hosted acceptance, then remove the adapter and tests.
+This adapter adds maintained Python to `actions`; its final profile must therefore include
+Python, Bandit and public CodeQL Python, without rewriting the original before-state ledger.
+
 ## 1. Scope and authority
 
 Use the catalog loaded by `platform-workloads/terraform/workloads.load.tf`, not a public
@@ -54,7 +89,7 @@ repository.
 | `.github` | Python automation and workflow security; preserve generated estate documentation |
 | `.github-copilot` | TypeScript tooling and workflow security; migrate the instruction/template source too |
 | `41-bovet-street` | Documentation/data applicability exemption; no executable source or workflows observed |
-| `actions` | Mixed action/tooling source, workflow security and existing .NET fixtures |
+| `actions` | Mixed JavaScript/Python action/tooling source, workflow security and existing .NET fixtures |
 | `ado-pipeline-templates` | Pipeline/template validation and workflow security; reassess blanket Sonar applicability |
 | `api-client-abstractions` | SDK-style .NET |
 | `baremetal-workload-template` | Private mixed template/tooling; preserve image publication and secret-sync behavior |
@@ -100,7 +135,7 @@ repository.
 | `talkwithtiles` | .NET application, frontend source and Terraform |
 | `travel-itinerary` | .NET application, frontend source and Terraform |
 | `trip-side-kick` | .NET application, frontend source and Terraform |
-| `twenty-one` | JavaScript application plus Terraform |
+| `twenty-one` | JavaScript static site plus Terraform; no declared tests or substantive build |
 
 An exemption is a maintained target-state decision with a reason and a re-evaluation condition,
 not a migration backlog item. An inaccessible repository, failed scan or unresolved feature
@@ -322,6 +357,26 @@ dispatch behavior, retry/concurrency bounds and applicable gating.
 
 Select actual supported coverage formats and report paths for each build variant. Document
 which tests supply coverage and where existing integration/browser tests remain.
+
+The captured public Sonar recipes contain 22 existing reusable build callers and three
+distinct variants; retain their exact SDK, source, project, formatting and CMake inputs.
+`actions` needs an explicit JavaScript/Python CI scanner before its currently enabled
+Automatic Analysis is disabled: its own `code-quality.yml` is MSDO/dependency review,
+whereas `codequality.yml` is a shared library, not its own Sonar CI caller.
+`demo-manager` retains Windows, .NET Framework 4.8, `nuget restore DemoManager.sln` and
+the original Release/Any CPU MSBuild build; install the analysis runtime before the
+scanner, without inventing tests or coverage. `twenty-one` retains Node 20.x and its
+`src` source/install recipe, but analysis must not invoke Static Web Apps deployment or
+pretend its echo-only build is application validation.
+
+For SDK-style .NET tests, retain the original solution and unit-test filter and select
+the pinned native `dotnet-coverage` collector where needed without changing test-project
+dependencies. Sonar's [official dotnet-coverage examples](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/test-coverage/dotnet-test-coverage#dotnetcoverage)
+document native Cobertura import through `sonar.cs.cobertura.reportsPaths`;
+collection alone still is not completed Sonar import evidence. Travel Itinerary's tests
+outside `src` are included by its solution. Preserve Portal Web's existing runsettings
+and separate integration/browser behavior. Missing tests or unsupported coverage need
+an explicit disposition, not fabricated zero coverage or successful test execution.
 
 Update the ops-clock design for daily checks and weekly full rescans, removing the obsolete
 Monday-only/Sunday-time coupling for analysis without rescheduling unrelated automation.
