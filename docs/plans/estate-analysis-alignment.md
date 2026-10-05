@@ -30,7 +30,7 @@ branch were retired **without merge**, leaving its default branch unchanged.
 
 This is backend acceptance, not a production pilot or partial estate adoption.
 Every result explicitly retains `fullProfileEvidence: false`. Production CodeQL integration,
-Sonar provider/coverage import, authenticated freshness reuse, catalog-governed caller activation,
+estate-wide Sonar provider/coverage import, authenticated freshness reuse, catalog-governed caller activation,
 publication guards, all applicable default callers, consumption and retirement remain
 outstanding. No App dependency-merge identity or Sonar Automatic Analysis cutover has occurred.
 
@@ -73,10 +73,12 @@ published immutable `repository-analysis-sonar/v1.0.0`,
 `repository-analysis/v1.0.1` and `dotnet-test/v1.1.1`. Their release source is the
 actual merged commit above; prior private acceptance is not acceptance of these new tags.
 
-The first real different-repository Sonar component adoption,
-`frasermolyneux/dotnet-caching#19`, remains **unmerged; default acceptance is pending**.
-Its immutable initial admission passed and the genuine protected `quality / Code Quality`
-context was confirmed, but [preparation](https://github.com/frasermolyneux/dotnet-caching/actions/runs/37354836665)
+The first real different-repository SDK Sonar component adoption,
+`frasermolyneux/dotnet-caching#19`, normally merged at
+`ef0f830972195b39816249d1f902b4ead632f4dd` after actual exact-head checks, complete
+review and preservation of its required native CodeQL producer.
+The original immutable admission passed and the genuine protected `quality / Code Quality`
+context was confirmed, but its first [preparation](https://github.com/frasermolyneux/dotnet-caching/actions/runs/37354836665)
 failed with Node exit 13 before scanning or coverage collection. A fresh-process
 regression reproduced a circular ESM evaluation wait: the Sonar entrypoint awaited
 its main function while that function imported a build validator that imports Sonar.
@@ -91,16 +93,38 @@ caller uses this real repaired tag. The
 completed actual scanner preparation, native installation, build, 94 passing unit
 tests, coverage collection, scanner end and independently bound task verification.
 Its real coverage report contains 1,702 selected lines and 1,247 covered lines; PR
-coverage remains **collected**, not default-branch import evidence. Complete current-head
-review also identified the original CodeQL producer removed by the Sonar-only replacement;
-that required native producer must remain separately active until the full engine
-actually replaces it. No scan requirement is weakened to merge the component adoption.
-This is not an observed provider rejection or proof of new-producer import.
+coverage remains **collected**, not default-branch import evidence. That run and its
+review belong to logical head `1f58c5a3c1cbdea6965c97cb10f01ea28fe2d5d4`, not a later
+adoption head. That review identified the removed original CodeQL producer, which was
+restored in a separate CodeQL-only call at the reviewed immutable shared source,
+with original SDK/build/test selections and no Sonar credential or duplicate Sonar task.
+
+The [final adoption-head run](https://github.com/frasermolyneux/dotnet-caching/actions/runs/37357618375)
+uses actual PR-merge source `c7c0a8287012fc05424f5290f4c37ec69278f562` containing
+logical head `6b2069711a7b67f1497f5e87d516ff4299df7596`. Sonar task evidence and native
+CodeQL analysis `1895820171` independently match that source; CodeQL 2.27.1 executed
+52 rules with zero findings. All applicable checks passed, the complete exact-head
+review had no findings, and both concrete review threads were resolved before normal
+merge. No scan requirement was weakened to adopt the component.
+
+The [actual merged-default push](https://github.com/frasermolyneux/dotnet-caching/actions/runs/37358286308)
+completed the new Sonar producer and existing native CodeQL at the exact merged source.
+Sonar analysis `2b9b26b8-0f08-40a0-8ff7-6f49b5c2e691` has verified **imported**
+coverage: 745 provider-measured lines, 517 covered. The bound native report retains
+1,702 selected lines, 1,247 covered and 94 passing executed tests; collection and
+provider populations are reported separately, not asserted equal. Historical
+provider measures, analysis revision/date and task are tied to that exact default source.
+Default CodeQL analysis `1895856097` also matches the merged source and has zero
+findings across 52 rules.
 
 The `actions` producer's actual scanner installation/build fixtures and
 source/origin/coverage contracts passed under their own identity. The separate foreign
-PR task success above is genuine, but default-branch positive provider-import acceptance
-remains outstanding; it is not inferred from passing installation or fixture builds.
+PR/default task and positive default import above are genuine, not inferred from
+installation or fixture builds. This accepts the SDK Sonar component, **not the full
+repository profile or 46-repository rollout**; the Sonar component proof retains
+`fullProfileEvidence: false`. The preserved CodeQL-only caller must remain active
+until the production native engine actually replaces it with verified current-source
+results, then be retired before estate closeout.
 The owner explicitly accepted the disclosed same-runner Sonar token-capture risk for
 verified first-party source; the policy below records that bounded exception, not isolation.
 
@@ -139,7 +163,7 @@ that lease; running PR plans now finish and release locks normally while retaini
 production serialization. Subsequent exact-head plans and the actual apply succeeded.
 
 This completes catalog configuration projection, **not scanner caller rollout**.
-Shared production CodeQL integration, Sonar foreign/default acceptance, freshness reuse, publication guards,
+Shared production CodeQL integration, remaining Sonar build-family/estate acceptance, freshness reuse, publication guards,
 all default callers, consumer migration and obsolete-provider retirement remain
 outstanding. No Sonar Automatic Analysis or dependency-merge identity cutover is claimed.
 
