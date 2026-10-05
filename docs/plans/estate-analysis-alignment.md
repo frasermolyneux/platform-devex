@@ -29,8 +29,8 @@ reports remain in their origin, not this public plan. The temporary acceptance d
 branch were retired **without merge**, leaving its default branch unchanged.
 
 This is backend acceptance, not a production pilot or partial estate adoption.
-Every result explicitly retains `fullProfileEvidence: false`. Full CodeQL language
-execution, Sonar/build/coverage import, authenticated freshness reuse, catalog projection,
+Every result explicitly retains `fullProfileEvidence: false`. Production CodeQL integration,
+Sonar/build/coverage import, authenticated freshness reuse, catalog projection,
 publication guards, all applicable default callers, consumption and retirement remain
 outstanding. No App dependency-merge identity or Sonar Automatic Analysis cutover has occurred.
 
@@ -44,14 +44,43 @@ positive/negative/hosted acceptance, then remove the adapter and tests.
 This adapter adds maintained Python to `actions`; its final profile must therefore include
 Python, Bandit and public CodeQL Python, without rewriting the original before-state ledger.
 
+### Verified native-analysis and prerequisite progress
+
+The [six-family CodeQL execution](https://github.com/frasermolyneux/actions/actions/runs/37323486404)
+completed actual Actions, JavaScript, Python, SDK .NET, Windows .NET Framework and C++
+extraction and queries. Maintained public source passed independent native processing;
+compiled fixtures did not publish source databases or native findings. Archived source is
+bound to the originating checkout, including a shared archive root. Raw SARIF result counts
+include diagnostics and are not native security-alert counts. This remains integration
+acceptance, not a released production CodeQL engine or a complete repository profile.
+
+`frasermolyneux/actions#46` contains the Sonar candidate and these integration contracts.
+It is not yet merged or released. Actual scanner/build execution and source/origin/coverage
+contracts passed, but new-producer Sonar provider/import acceptance remains outstanding.
+The owner explicitly accepted the disclosed same-runner Sonar token-capture risk for
+verified first-party source; the policy below records that bounded exception, not isolation.
+
+`frasermolyneux/platform-workloads#218` normally merged at
+`e39df01a65725f9aaf9a667ae07705e3ba1bb8c6`. Its reviewed production plan adds exactly the
+two existing-broker Sonar secrets for the policy-managed Actions repository, with no Azure
+changes, new credential issuance or repository lifecycle import.
+[Production attempt 2](https://github.com/frasermolyneux/platform-workloads/actions/runs/37323643138/attempts/2)
+applied exactly two additions, zero changes and zero destroys; both Actions and Dependabot
+`SONAR_TOKEN` metadata are verified without reading their values. The unchanged-head retry
+recovered an initial transient GitHub OIDC refresh failure. This prerequisite does not
+represent full catalog projection or Sonar cutover.
+
 ## 1. Scope and authority
 
 Use the catalog loaded by `platform-workloads/terraform/workloads.load.tf`, not a public
 GitHub repository listing or `platform-devex`'s continuous-improvement opt-in list.
 
-The inspected catalog revision is
+The original before-state catalog revision is
 `33e31f3c9459403b561b64d2a44edd287260b850`. It contains 61 non-example definitions:
 50 are in scope and 11 have the excluded `xi-` prefix.
+The broker prerequisite advanced catalog main to
+`e39df01a65725f9aaf9a667ae07705e3ba1bb8c6` without changing this scope; retain the
+original snapshot rather than relabeling it as the new revision.
 
 Scope includes both lifecycle-managed repositories and cataloged, policy-managed repositories
 with `github.manage_repository: false`. The latter are already centrally governed; including
@@ -262,6 +291,24 @@ missing expected reports and publication failures are explicit incomplete states
 successful zero-finding scans. New subscriptions, ownership or visibility changes still
 require separate owner approval.
 
+### First-party Sonar execution boundary
+
+The owner chose verified first-party execution rather than isolated token-bearing publication.
+Running build code without `SONAR_TOKEN` does not prevent that code from leaving a process or
+replacing a scanner that later receives the token. This same-runner risk is explicitly
+accepted only for live-verified public personal-owner source; do not describe it as isolation.
+
+PR admission requires an open, non-draft, current-head, same-repository PR authored by the
+verified owner or the exact approved Copilot/Dependabot identities. The authenticated current
+triggering actor must be that owner or matching approved automation; `github-actions[bot]`
+is trusted only when paired with a verified Dependabot author. An owner rerun can authorize
+an approved automation origin, never an untrusted author. Deny forks, other contributors,
+generic bots, identity mismatches and superseded heads before checkout and every prepared
+token-bearing phase. Non-PR analysis requires the default branch or explicit owner dispatch.
+
+This is not general App/bot publication trust, permission to publish private source or a
+change to continuous-improvement PRs' human final-merge requirement.
+
 ### Merge identity and behavior preservation
 
 Use the shared GitHub App for eligible automated dependency merges, with fresh target-scoped
@@ -393,7 +440,8 @@ but separate analysis from packaging/deployment side effects.
 
 Add focused automated coverage for profile validation, applicability, immutable revisions,
 freshness thresholds, tool/category completeness, async processing, private publication,
-malformed reports, duplicate dispatches, concurrency, safe retries and credential isolation.
+malformed reports, duplicate dispatches, concurrency, safe retries and credential boundaries,
+including the explicitly accepted first-party Sonar same-runner exception above.
 Cover trusted/untrusted merge-origin combinations and every privileged publication decision.
 
 Exercise all build families through integration fixtures/consumer commands: SDK .NET,
