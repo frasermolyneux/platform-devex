@@ -30,7 +30,7 @@ branch were retired **without merge**, leaving its default branch unchanged.
 
 This is backend acceptance, not a production pilot or partial estate adoption.
 Every result explicitly retains `fullProfileEvidence: false`. Production CodeQL integration,
-Sonar/build/coverage import, authenticated freshness reuse, catalog-governed caller activation,
+Sonar provider/coverage import, authenticated freshness reuse, catalog-governed caller activation,
 publication guards, all applicable default callers, consumption and retirement remain
 outstanding. No App dependency-merge identity or Sonar Automatic Analysis cutover has occurred.
 
@@ -46,21 +46,52 @@ Python, Bandit and public CodeQL Python, without rewriting the original before-s
 
 ### Verified native-analysis and prerequisite progress
 
-The [current-candidate six-family CodeQL execution](https://github.com/frasermolyneux/actions/actions/runs/37344365578)
+The [merged-main six-family CodeQL execution](https://github.com/frasermolyneux/actions/actions/runs/37354246115)
 completed actual Actions, JavaScript, Python, SDK .NET, Windows .NET Framework and C++
 extraction and queries. Maintained public source passed independent native processing;
 compiled fixtures did not publish source databases or native findings. Archived source is
 bound to the originating checkout, including a shared archive root. Raw SARIF result counts
 include diagnostics and are not native security-alert counts. This remains integration
 acceptance, not a released production CodeQL engine or a complete repository profile.
-Its actual PR-merge source is `79e15ede9acb26782cdbfb5489eaa5128e1f31b7`,
-not the logical candidate head. All nine extraction/native proofs were independently
-checked; the three maintained-language native analyses have zero findings. Earlier
-candidate evidence is retained under its own source/run identity, not relabeled.
+Its actual push source is `c4dcaf4142a2e56a5c50af52c7c9eb8c441ebfab`, the normally
+merged `frasermolyneux/actions#46` source. All nine extraction/native proofs were
+independently checked against the actual run and native analyses. Maintained Actions,
+JavaScript and Python extraction covers 18, 98 and four files respectively; SDK,
+Framework and C++ fixtures cover two, one and two. These are archive counts, not
+evaluated-line coverage. The Actions and Python native analyses have zero findings;
+JavaScript has two visible incomplete-sanitization findings in the unchanged Terraform
+comment formatter. The final PR execution had zero native findings under its PR identity;
+that is not a zero-findings claim for the default branch. Earlier candidate evidence
+is retained under its own source/run identity, not relabeled.
 
-`frasermolyneux/actions#46` contains the Sonar candidate and these integration contracts.
-It is not yet merged or released. Actual scanner/build execution and source/origin/coverage
-contracts passed, but new-producer Sonar provider/import acceptance remains outstanding.
+`frasermolyneux/actions#46` normally merged after passing exact-head checks, 86 coupled
+contracts and a complete current-head Copilot review with no outstanding findings.
+The [actual release](https://github.com/frasermolyneux/actions/actions/runs/37354246009)
+published immutable `repository-analysis-sonar/v1.0.0`,
+`repository-analysis-context/v1.0.3`, `repository-analysis-local/v1.1.1`,
+`repository-analysis-sarif/v1.0.2`, `repository-analysis-state/v1.0.2`,
+`repository-analysis/v1.0.1` and `dotnet-test/v1.1.1`. Their release source is the
+actual merged commit above; prior private acceptance is not acceptance of these new tags.
+
+The first real different-repository Sonar component adoption,
+`frasermolyneux/dotnet-caching#19`, remains **unmerged and unaccepted**.
+Its immutable initial admission passed and the genuine protected `quality / Code Quality`
+context was confirmed, but [preparation](https://github.com/frasermolyneux/dotnet-caching/actions/runs/37354836665)
+failed with Node exit 13 before scanning or coverage collection. A fresh-process
+regression reproduced a circular ESM evaluation wait: the Sonar entrypoint awaited
+its main function while that function imported a build validator that imports Sonar.
+`frasermolyneux/actions#47` normally merged the isolated root-cause repair at
+`37c6a8a3461d7cfe61907b4ef450a248578a9009` after all checks, complete exact-head
+review and 54 focused coupled contracts on both hosted OS families, including direct
+prepare/authorize/verify subprocess regressions. Its
+[actual release](https://github.com/frasermolyneux/actions/actions/runs/37356225728)
+published `repository-analysis-sonar/v1.0.1` at that exact merged source. The foreign
+caller is being updated to this real repaired tag; successful foreign/default evidence
+is still required before adoption is accepted.
+This is not an observed provider rejection or proof of new-producer import.
+
+Actual scanner installation/build execution and source/origin/coverage contracts
+passed, but new-producer Sonar provider/default-import acceptance remains outstanding.
 The owner explicitly accepted the disclosed same-runner Sonar token-capture risk for
 verified first-party source; the policy below records that bounded exception, not isolation.
 
@@ -99,7 +130,7 @@ that lease; running PR plans now finish and release locks normally while retaini
 production serialization. Subsequent exact-head plans and the actual apply succeeded.
 
 This completes catalog configuration projection, **not scanner caller rollout**.
-Shared production CodeQL/Sonar integration, freshness reuse, publication guards,
+Shared production CodeQL integration, Sonar foreign/default acceptance, freshness reuse, publication guards,
 all default callers, consumer migration and obsolete-provider retirement remain
 outstanding. No Sonar Automatic Analysis or dependency-merge identity cutover is claimed.
 
