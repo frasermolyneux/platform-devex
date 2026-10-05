@@ -253,11 +253,30 @@ an original bot actor, and human final merge for improvement PRs remains require
 Do not infer the original push reference from today's tags/branches; downstream metadata
 cannot prove that history. No OIDC permission or signed-original-event scheme is introduced.
 
+One owner-approved existing-route exception preserves `molyneux-me`'s configured
+Dependabot controller dispatch to `deploy-prd.yml`. Its existing controller explicitly
+dispatches both quality and deployment after an eligible merge; `GITHUB_TOKEN` suppression
+does not apply to `workflow_dispatch`. Removing that deployment would change configured
+behavior, even though the inspected recent history does not establish a successful automated
+deployment. This exception is a target-state requirement, not an implemented or verified route.
+
+Authorize only the same existing controller-to-deployment edge, with independently verified
+originating run/attempt, trusted reviewed controller definition, eligible same-repository
+Dependabot PR, immutable author/merge identities, exact merged source and intended target
+workflow. Retain its Terraform-plan waits, update eligibility, source/change detection,
+development-to-production ordering, environments and existing deployment gates. A caller's
+run ID, PR number, expected SHA or bot identity alone is not proof; missing or ambiguous
+linkage must hold deployment for human attention. Do not give `github-actions[bot]` or the
+shared App general publication permission, authorize another dependency publication route,
+or use the human Copilot PAT. Newly reachable App-authenticated push routes remain denied,
+and improvement PRs still require human final merge.
+
 The preservation rule is: new App-authenticated automatic dependency merges receive ordinary
 post-merge analysis/validation but do not gain production/development deployments, Terraform
 applies or release publication currently suppressed by `GITHUB_TOKEN`. Existing human-merge,
-manual and scheduled behavior remains unchanged. Enabling auto-merge is not evidence that an
-actual merge or its subsequent analysis has occurred.
+manual, scheduled and explicitly approved existing dependency-dispatch behavior remains
+unchanged. Enabling auto-merge is not evidence that an actual merge or its subsequent analysis
+has occurred.
 
 ## 3. Dependency-ordered work packages
 
@@ -368,6 +387,9 @@ those responsibilities while consolidating an analysis filename.
 Test the event/origin matrix against each repository's declared publication policy. Preserve
 human/manual/scheduled positive cases and demonstrate that automatic dependency merges cannot
 newly apply/deploy/publish. Missing origin must remain explicit, not assumed to be trusted.
+Separately verify the approved existing `molyneux-me` dispatch edge with genuine eligible
+dependency-merge/controller/source evidence; its configured existence is not positive
+execution evidence, and must not become a blanket dependency-publication exception.
 
 **Exit:** all affected routes are protected; existing behavior is evidenced before App-based
 automatic merges can reach them.
@@ -486,7 +508,7 @@ span a normal scheduled/dependency-update cycle; that is not a pilot.
 | Coverage | Real imported reports match analyzed source; unsupported/absent coverage is explained, not faked as zero or success |
 | Private features | Entitlements and permitted analyzer/publication alternatives are verified; no unapproved subscription or license bypass |
 | Normal automated merge | An eligible real dependency merge uses the intended App identity, obeys protections and produces the expected default-branch analysis |
-| Publication preservation | No newly reachable deploy/apply/tag/package/image route on automatic dependency merges; existing human/manual/scheduled routes retain intended behavior |
+| Publication preservation | No newly reachable deploy/apply/tag/package/image route on automatic dependency merges; existing human/manual/scheduled routes and the narrowly approved dependency-dispatch edge retain intended behavior with verified origin/source |
 | Untrusted contribution | Fork/human/unknown-bot cases cannot obtain merge credentials, privileged checkout, automatic merge or DevEx approval/delegation through the new standard |
 | Schedule and dispatch | Repository-owned scheduled checks run, unchanged/due decisions meet the daily/weekly thresholds, and bounded deduplicated dispatch works at the intended revision |
 | Repository independence | Ordinary PR/main/scheduled analysis succeeds without platform-devex dispatching it; central governance is not the normal scan engine |
