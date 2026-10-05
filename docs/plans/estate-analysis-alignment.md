@@ -74,7 +74,7 @@ published immutable `repository-analysis-sonar/v1.0.0`,
 actual merged commit above; prior private acceptance is not acceptance of these new tags.
 
 The first real different-repository Sonar component adoption,
-`frasermolyneux/dotnet-caching#19`, remains **unmerged and unaccepted**.
+`frasermolyneux/dotnet-caching#19`, remains **unmerged; default acceptance is pending**.
 Its immutable initial admission passed and the genuine protected `quality / Code Quality`
 context was confirmed, but [preparation](https://github.com/frasermolyneux/dotnet-caching/actions/runs/37354836665)
 failed with Node exit 13 before scanning or coverage collection. A fresh-process
@@ -86,12 +86,21 @@ review and 54 focused coupled contracts on both hosted OS families, including di
 prepare/authorize/verify subprocess regressions. Its
 [actual release](https://github.com/frasermolyneux/actions/actions/runs/37356225728)
 published `repository-analysis-sonar/v1.0.1` at that exact merged source. The foreign
-caller is being updated to this real repaired tag; successful foreign/default evidence
-is still required before adoption is accepted.
+caller uses this real repaired tag. The
+[repaired PR run](https://github.com/frasermolyneux/dotnet-caching/actions/runs/37356405371)
+completed actual scanner preparation, native installation, build, 94 passing unit
+tests, coverage collection, scanner end and independently bound task verification.
+Its real coverage report contains 1,702 selected lines and 1,247 covered lines; PR
+coverage remains **collected**, not default-branch import evidence. Complete current-head
+review also identified the original CodeQL producer removed by the Sonar-only replacement;
+that required native producer must remain separately active until the full engine
+actually replaces it. No scan requirement is weakened to merge the component adoption.
 This is not an observed provider rejection or proof of new-producer import.
 
-Actual scanner installation/build execution and source/origin/coverage contracts
-passed, but new-producer Sonar provider/default-import acceptance remains outstanding.
+The `actions` producer's actual scanner installation/build fixtures and
+source/origin/coverage contracts passed under their own identity. The separate foreign
+PR task success above is genuine, but default-branch positive provider-import acceptance
+remains outstanding; it is not inferred from passing installation or fixture builds.
 The owner explicitly accepted the disclosed same-runner Sonar token-capture risk for
 verified first-party source; the policy below records that bounded exception, not isolation.
 
