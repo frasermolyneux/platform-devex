@@ -18,6 +18,13 @@ SDK native producer is retired. Sonar PR facts explicitly remain incremental rat
 than claiming whole-branch source completeness. The plan records these
 component boundaries; they do not establish full-profile or 46-repository rollout completion.
 
+The [publication guard migration installer](docs/publication-guard-installer.md) compiles
+reviewed source-bound route declarations and stages deterministic workflow patches without
+writing targets. It preserves existing gates and explicitly reports unsupported PR,
+direct/chained producer and approved dependency-dispatch routes. Candidate patches and
+unit fixtures are not installed guards or target publication acceptance; merge identity
+changes remain blocked until every applicable route has genuine acceptance.
+
 ## What it does
 
 Three independent workflows run every 30 minutes on staggered schedules, or on demand via
