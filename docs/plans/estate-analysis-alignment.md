@@ -198,6 +198,45 @@ Regenerate scope from the current catalog before each write batch and at final c
 New in-scope catalog entries must be included before completion. Apply exclusions before
 minting target tokens or performing any write.
 
+The 2026-10-06 refresh uses current catalog commit
+`46ccd5e49dc9059bc0d51ac0728d629880e2afa9`: the same 61 non-example definitions,
+11 `xi-*` exclusions and 50 dispositions (46 applicable, four maintained exemptions).
+The analysis projection was actually applied at
+`7b0a3689866a2901cacc9ecb5bdd795029ddeb64`; the subsequent catalog delta is unrelated
+`portal-environments` role admission, not an analysis scope/profile change. Preserve it.
+The original revision above remains the captured before-state, not current write authority.
+
+### Verified component progress
+
+These are preparation/acceptance milestones, not full-profile or estate completion.
+
+| Component | Actual boundary |
+| --- | --- |
+| Collected coverage state | `repository-analysis-state/v1.1.0` released after frasermolyneux/actions#49; genuine collected reports/tests are preserved without inventing provider import |
+| Selected-native engine | frasermolyneux/actions#48 released `repository-analysis-codeql/v1.0.0`; later executable-closure/source-authority patches are published through `v1.0.2`, not a full orchestrator |
+| Native SDK caller | frasermolyneux/dotnet-caching#20 merged at `7f938a740a7cf12cec47c6280f176099a4741808`; actual PR run `37546285453` and default run `37547225641` independently verify immutable definition/source, raw artifact receipts and completed Actions/C# processing |
+| Shared source authority | frasermolyneux/actions#51 released context `v1.1.0` at `3490bc4b344e919932bf9d673e2012bf354f67a1`; actual private metadata can be admitted without faking public status, while Sonar/CodeQL still independently require live-public eligibility |
+| Sonar provider facts | frasermolyneux/actions#50 released branch/PR task-bound file/issue metadata; foreign frasermolyneux/dotnet-caching#21 remains unmerged after genuine execution exposed an empty incremental PR file population |
+
+The accepted native SDK default has seven workflow files/17 rules and 33 C# files/52 rules,
+both with zero findings. This does not erase the shared Actions repository's two legitimate
+default JavaScript findings or imply identical native/provider source or coverage populations.
+Original SDK producer retirement must use the verified replacement evidence and fresh
+protected-check/review gates; temporary dual execution is not the final operating model.
+
+After the real Sonar task and all 94 tests succeeded but its PR metadata returned no files
+(versus 26 on the default branch), the owner approved explicit scope separation: branch
+source-capability evidence remains mandatory; PR task/finding evidence is incremental with
+an explicit unavailable whole-branch source-coverage field. Preserve quality gates, complete
+paging, source/task/producer binding, file ownership, before/after snapshots and explicit
+provider errors. Never manufacture whole-source coverage or use PR data for default freshness.
+This runtime repair still requires a reviewed release and real foreign/default acceptance.
+
+Full-profile orchestration, authenticated unchanged-source/rule-currency reuse, publication
+route guards, all 46 callers, consumption/reporting, and final obsolete-project/configuration
+retirement remain incomplete. Library releases and local private-metadata contracts do not
+prove actual private full-profile execution or installation of the planned estate workflows.
+
 ### Repository coverage ledger
 
 The target families below are initial classifications from catalog and repository-tree
