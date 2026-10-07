@@ -10,7 +10,12 @@ frasermolyneux repositories.
 security/quality analysis across the `platform-workloads` catalog, excluding `xi-*` and
 uncatalogued repositories. It includes scanner profiles, App-authenticated dependency merges
 with deployment/release behavior protection, estate-wide rollout, documentation updates and
-complete retirement of obsolete approaches. This is a plan, not implemented runtime behavior.
+complete retirement of obsolete approaches. The full operating model is still in progress,
+not this controller's implemented runtime behavior. Shared selected-native analysis,
+truthful collected-coverage state and visibility-aware source-authority components are
+released; native SDK PR/default acceptance is verified. New Sonar provider-facts adoption
+remains held while a real PR metadata-scope failure is repaired. The plan records these
+component boundaries; they do not establish full-profile or 46-repository rollout completion.
 
 ## What it does
 
