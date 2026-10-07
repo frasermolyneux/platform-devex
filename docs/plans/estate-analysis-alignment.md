@@ -213,16 +213,19 @@ These are preparation/acceptance milestones, not full-profile or estate completi
 | Component | Actual boundary |
 | --- | --- |
 | Collected coverage state | `repository-analysis-state/v1.1.0` released after frasermolyneux/actions#49; genuine collected reports/tests are preserved without inventing provider import |
-| Selected-native engine | frasermolyneux/actions#48 released `repository-analysis-codeql/v1.0.0`; later executable-closure/source-authority patches are published through `v1.0.2`, not a full orchestrator |
+| Selected-native engine | frasermolyneux/actions#48 released `repository-analysis-codeql/v1.0.0`; later executable-closure/source-authority/provider patches are published through `v1.0.4`, not a full orchestrator |
 | Native SDK caller | frasermolyneux/dotnet-caching#20 merged at `7f938a740a7cf12cec47c6280f176099a4741808`; actual PR run `37546285453` and default run `37547225641` independently verify immutable definition/source, raw artifact receipts and completed Actions/C# processing |
 | Shared source authority | frasermolyneux/actions#51 released context `v1.1.0` at `3490bc4b344e919932bf9d673e2012bf354f67a1`; actual private metadata can be admitted without faking public status, while Sonar/CodeQL still independently require live-public eligibility |
-| Sonar provider facts | frasermolyneux/actions#50 released branch/PR task-bound file/issue metadata; foreign frasermolyneux/dotnet-caching#21 remains unmerged after genuine execution exposed an empty incremental PR file population |
+| Sonar provider facts | frasermolyneux/actions#50 released task-bound metadata; actual scope/settlement repairs through frasermolyneux/actions#52 and frasermolyneux/actions#53 released Sonar `v1.1.3` at `8a48419c4ac7629dc227af900b8a3d183de13656`, genuinely accepted on foreign SDK PR/default after frasermolyneux/dotnet-caching#21 |
 
 The accepted native SDK default has seven workflow files/17 rules and 33 C# files/52 rules,
 both with zero findings. This does not erase the shared Actions repository's two legitimate
 default JavaScript findings or imply identical native/provider source or coverage populations.
-Original SDK producer retirement must use the verified replacement evidence and fresh
-protected-check/review gates; temporary dual execution is not the final operating model.
+The original SDK producer was retired through frasermolyneux/dotnet-caching#22 after
+fresh protected-check/review gates and independently authenticated actual current/default
+processing. Post-retirement default run `37574765205` at
+`87d94780aa42ecedb9a6cfcc05f7f8bc2e8f53c5` retains both capability/rule counts and zero
+findings. No old analysis history or protection was deleted to permit the transition.
 
 After the real Sonar task and all 94 tests succeeded but its PR metadata returned no files
 (versus 26 on the default branch), the owner approved explicit scope separation: branch
@@ -230,7 +233,29 @@ source-capability evidence remains mandatory; PR task/finding evidence is increm
 an explicit unavailable whole-branch source-coverage field. Preserve quality gates, complete
 paging, source/task/producer binding, file ownership, before/after snapshots and explicit
 provider errors. Never manufacture whole-source coverage or use PR data for default freshness.
-This runtime repair still requires a reviewed release and real foreign/default acceptance.
+The reviewed release is now genuinely accepted. A second real execution exposed PR-list
+metadata lag immediately after successful task completion. The bounded settlement repair
+waits only for otherwise valid same-PR metadata, within the same absolute two-minute facts
+deadline, rechecking the successful own receipt/latest project task and empty queue on every
+wait. Malformed/foreign/failed/superseding/provider errors fail immediately; both settled
+before/after snapshots must still be identical. No stale snapshot or deadline reset is accepted.
+
+Actual final SDK PR run `37576761123` at merge source
+`63cf486c9ee7b3299073b85a20357e6713c5d274` passed with the released Sonar definition,
+authenticated raw ZIP/expanded file hashes, exact task/analysis/source and independently
+rechecked public snapshot/file metadata/scoped findings. Its facts truthfully report null
+whole-branch coverage and zero returned incremental files, not zero analyzed source; its
+raw current-PR findings are zero. All 94 tests passed, with genuinely collected native
+coverage of 1,702 total/1,247 covered lines, not claimed PR provider import.
+
+Actual merged-default run `37577226988` at
+`8dc9cca4a40b0ee405710fb53f8fc2f8c98db83f` independently verifies the same immutable
+Sonar release/digest, raw receipts, actual task `AaEU37P8laAcVppxnQfA`, analysis
+`1ea19a59-ad11-4db7-ae37-7e71f0743247`, positive metadata for 26 C# files and
+13 actual unresolved backlog findings. Exact-analysis historical provider import is
+745 total/517 covered lines, distinct from the native collection population. Unchanged
+native Actions/C# processing also passed on that default source. This closes component
+foreign/default acceptance, not full-profile, reuse or estate-wide caller acceptance.
 
 Full-profile orchestration, authenticated unchanged-source/rule-currency reuse, publication
 route guards, all 46 callers, consumption/reporting, and final obsolete-project/configuration

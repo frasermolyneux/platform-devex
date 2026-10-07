@@ -13,8 +13,9 @@ with deployment/release behavior protection, estate-wide rollout, documentation 
 complete retirement of obsolete approaches. The full operating model is still in progress,
 not this controller's implemented runtime behavior. Shared selected-native analysis,
 truthful collected-coverage state and visibility-aware source-authority components are
-released; native SDK PR/default acceptance is verified. New Sonar provider-facts adoption
-remains held while a real PR metadata-scope failure is repaired. The plan records these
+released; native and Sonar SDK PR/default acceptance is verified, and the original
+SDK native producer is retired. Sonar PR facts explicitly remain incremental rather
+than claiming whole-branch source completeness. The plan records these
 component boundaries; they do not establish full-profile or 46-repository rollout completion.
 
 ## What it does
