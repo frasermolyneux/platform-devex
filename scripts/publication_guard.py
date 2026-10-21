@@ -512,7 +512,8 @@ def verify_head_sources(manifest, root, expected_head, app_id):
             metadata, path = entry.split(b"\t", 1)
             mode, kind, sha = metadata.decode("ascii").split()
             entries[path.decode("utf8")] = (mode, kind, sha)
-    workflows = {path for path in entries if WORKFLOW.fullmatch(path)}
+    workflows = {path for path in entries if path.startswith(".github/workflows/") and
+                 path.count("/") == 2 and path.endswith((".yml", ".yaml"))}
     require(workflows == {item["path"] for item in manifest["workflows"]}, "head-workflow-set-changed")
     for declaration in manifest["workflows"]:
         mode, kind, sha = entries[declaration["path"]]

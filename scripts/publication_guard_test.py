@@ -409,13 +409,15 @@ class PlanningTests(unittest.TestCase):
                 (action_root / "action.yml").unlink()
 
     def test_locally_deleted_committed_workflow_cannot_hide_from_head_inventory(self):
-        filename = self.root / ".github" / "workflows" / "unreviewed.yml"
-        filename.write_bytes(SOURCE.encode())
-        self.head = self.commit_target()
-        filename.unlink()
-        with self.assertRaisesRegex(installer.Refusal, "head-workflow-set-changed"):
-            self.plan()
-        self.assertFalse((self.directory / "out").exists())
+        for name in ["unreviewed.yml", "release workflow.yml", "release-\u00e9.yaml"]:
+            with self.subTest(name=name):
+                filename = self.root / ".github" / "workflows" / name
+                filename.write_bytes(SOURCE.encode())
+                self.head = self.commit_target()
+                filename.unlink()
+                with self.assertRaisesRegex(installer.Refusal, "head-workflow-set-changed"):
+                    self.plan()
+                self.assertFalse((self.directory / "out").exists())
 
     def test_locally_restored_runtime_source_cannot_hide_committed_drift(self):
         filename = self.root / "runtime.sh"
