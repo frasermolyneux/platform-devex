@@ -50,6 +50,9 @@ normal migration review. Do not hand-edit classifications, source bindings or ga
 force a pass. Changed current workflows, new workflows, changed owned runtime files or
 changed floating inherited/primitive references need renewed semantic review and a bounded
 installer/authority update, not a fallback to the old before-state.
+Inherited definitions reviewed at multiple commits are conservatively refused, rather
+than allowing one invocation's floating reference to borrow another invocation's reviewed
+source identity.
 
 `plan` rechecks live head/catalog/identity and source files before recording a receipt.
 It emits `publication-guard.patch` and `receipt.json`; stdout contains only safe counts,

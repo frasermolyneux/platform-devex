@@ -429,6 +429,31 @@ class PlanningTests(unittest.TestCase):
                                 f"repos/owner/shared/contents/{path}?ref=" + "a" * 40)
                     (self.root / path).unlink()
 
+    def test_floating_reference_cannot_borrow_another_invocations_reviewed_version(self):
+        import base64
+        source = SOURCE.replace("- run: echo validation", "- uses: owner/shared@v1").replace(
+            "- run: echo publication", "- uses: owner/shared@v2")
+        self.manifest["workflows"] = [declaration(source)]
+        definitions = {}
+        for job, revision, command in [("build", "a" * 40, "readonly"),
+                                       ("publish", "b" * 40, "publication")]:
+            shared = f"runs:\n  using: composite\n  steps:\n    - run: echo {command}\n      shell: bash\n"
+            definitions[revision] = {"sha": installer.blob(shared.encode()),
+                                     "content": base64.b64encode(shared.encode()).decode()}
+            self.manifest["workflows"][0]["jobs"][job]["effects"] = [
+                {"kind": "executor", "chain": [{}, {"repository": "owner/shared", "path": "action.yml",
+                 "sourceSha": revision, "blobSha": installer.blob(shared.encode())}]}]
+
+        def moved_reference(endpoint):
+            if "/commits/" in endpoint:
+                return {"sha": "b" * 40}
+            return definitions[endpoint.split("?ref=")[1]]
+
+        with patch.object(installer, "github", side_effect=moved_reference) as github:
+            with self.assertRaisesRegex(installer.Refusal, "multiple-reviewed-inherited-versions"):
+                installer.verify_sources(self.manifest, self.root)
+            github.assert_not_called()
+
     def test_competing_local_action_metadata_is_refused(self):
         shared = "runs:\n  using: composite\n  steps:\n    - run: echo reviewed\n      shell: bash\n"
         for directory in ["", "local-action"]:

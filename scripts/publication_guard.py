@@ -427,7 +427,7 @@ def uses_in(document):
 
 
 def verify_sources(manifest, root):
-    identities, primitives = {}, {}
+    identities, primitives, versions = {}, {}, {}
     for workflow in manifest["workflows"]:
         for route in workflow["jobs"].values():
             for effect in route["effects"]:
@@ -442,6 +442,9 @@ def verify_sources(manifest, root):
                         identity = (entry["repository"], entry["path"], entry["sourceSha"])
                         require(HEX40.fullmatch(entry["sourceSha"]) and HEX40.fullmatch(entry["blobSha"]),
                                 "unbound-inherited-source")
+                        require(versions.get(identity[:2], identity[2]) == identity[2],
+                                "multiple-reviewed-inherited-versions")
+                        versions[identity[:2]] = identity[2]
                         require(identity not in identities or identities[identity] == entry["blobSha"],
                                 "ambiguous-inherited-source")
                         identities[identity] = entry["blobSha"]
