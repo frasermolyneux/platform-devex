@@ -210,6 +210,9 @@ class PlanningTests(unittest.TestCase):
         self.root = self.directory / "target"
         (self.root / ".github" / "workflows").mkdir(parents=True)
         (self.root / ".github" / "workflows" / "deploy.yml").write_bytes(SOURCE.encode())
+        installer.command(["git", "init", "--quiet"], self.root)
+        installer.command(["git", "config", "core.autocrlf", "false"], self.root)
+        self.head = self.commit_target()
         self.manifest = {"schema": installer.SCHEMA, "repository": "frasermolyneux/synthetic",
                          "repositoryId": 1, "visibility": "private", "defaultBranch": "main",
                          "guardSha": installer.GUARD_SHA, "recipeDigest": installer.RECIPES_DIGEST,
@@ -224,7 +227,12 @@ class PlanningTests(unittest.TestCase):
 
     def tearDown(self):
         patch.stopall()
-        shutil.rmtree(self.directory)
+        def remove_readonly(function, path, error):
+            if not isinstance(error[1], PermissionError):
+                raise error[1]
+            os.chmod(path, 0o700)
+            function(path)
+        shutil.rmtree(self.directory, onerror=remove_readonly)
 
     def write_manifest(self):
         data = json.dumps(self.manifest).encode()
@@ -233,7 +241,13 @@ class PlanningTests(unittest.TestCase):
 
     def plan(self):
         return installer.plan(self.manifest_path, self.manifest_digest, self.root, self.directory / "out",
-                              "a" * 40, "b" * 40)
+                              "a" * 40, self.head)
+
+    def commit_target(self):
+        installer.command(["git", "add", "."], self.root)
+        installer.command(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                           "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Synthetic fixture"], self.root)
+        return installer.command(["git", "rev-parse", "HEAD"], self.root)
 
     def test_plan_stages_patch_never_writes_target_and_private_summary_has_no_source(self):
         summary = self.plan()
@@ -265,6 +279,7 @@ class PlanningTests(unittest.TestCase):
         self.write_manifest()
         filename = self.root / ".github" / "workflows" / "deploy.yml"
         filename.write_bytes(source.encode())
+        self.head = self.commit_target()
         self.plan()
         patch_file = self.directory / "out" / "publication-guard.patch"
         installer.command(["git", "apply", "--check", str(patch_file)], self.root)
@@ -286,6 +301,7 @@ class PlanningTests(unittest.TestCase):
         self.manifest["workflows"].append(d)
         (self.root / ".github" / "workflows" / "relay.yml").write_bytes(source.encode())
         self.write_manifest()
+        self.head = self.commit_target()
         self.assertFalse(self.plan()["complete"])
         receipt = json.loads((self.directory / "out" / "receipt.json").read_text())
         self.assertEqual(receipt["blockedWorkflows"][0]["category"],
@@ -371,6 +387,64 @@ class PlanningTests(unittest.TestCase):
                         else:
                             github.assert_called_once_with(
                                 f"repos/owner/shared/contents/{path}?ref=" + "a" * 40)
+                    (self.root / path).unlink()
+
+    def test_competing_local_action_metadata_is_refused(self):
+        shared = "runs:\n  using: composite\n  steps:\n    - run: echo reviewed\n      shell: bash\n"
+        for directory in ["", "local-action"]:
+            with self.subTest(directory=directory):
+                action_root = self.root / directory
+                action_root.mkdir(exist_ok=True)
+                declared = (directory + "/" if directory else "") + "action.yaml"
+                (action_root / "action.yaml").write_bytes(shared.encode())
+                (action_root / "action.yml").write_bytes(shared.replace("reviewed", "unreviewed").encode())
+                source = SOURCE.replace("- run: echo publication", "- uses: ./" + directory)
+                self.manifest["workflows"] = [declaration(source)]
+                self.manifest["workflows"][0]["jobs"]["publish"]["effects"] = [
+                    {"kind": "executor", "chain": [{}, {"repository": self.manifest["repository"],
+                     "path": declared, "sourceSha": "a" * 40, "blobSha": installer.blob(shared.encode())}]}]
+                with self.assertRaisesRegex(installer.Refusal, "shadowing-local-action-metadata"):
+                    installer.verify_sources(self.manifest, self.root)
+                (action_root / "action.yaml").unlink()
+                (action_root / "action.yml").unlink()
+
+    def test_locally_deleted_committed_workflow_cannot_hide_from_head_inventory(self):
+        filename = self.root / ".github" / "workflows" / "unreviewed.yml"
+        filename.write_bytes(SOURCE.encode())
+        self.head = self.commit_target()
+        filename.unlink()
+        with self.assertRaisesRegex(installer.Refusal, "head-workflow-set-changed"):
+            self.plan()
+        self.assertFalse((self.directory / "out").exists())
+
+    def test_locally_restored_runtime_source_cannot_hide_committed_drift(self):
+        filename = self.root / "runtime.sh"
+        original = b"echo reviewed\n"
+        filename.write_bytes(b"echo unreviewed\n")
+        self.head = self.commit_target()
+        filename.write_bytes(original)
+        self.manifest["runtimeSources"] = [{"repository": self.manifest["repository"],
+                                            "path": "runtime.sh", "blobSha": installer.blob(original)}]
+        self.write_manifest()
+        with self.assertRaisesRegex(installer.Refusal, "head-owned-source-changed"):
+            self.plan()
+        self.assertFalse((self.directory / "out").exists())
+
+    def test_locally_restored_workflow_cannot_hide_committed_drift(self):
+        filename = self.root / ".github" / "workflows" / "deploy.yml"
+        filename.write_bytes(SOURCE.replace("echo publication", "echo unreviewed").encode())
+        self.head = self.commit_target()
+        filename.write_bytes(SOURCE.encode())
+        with self.assertRaisesRegex(installer.Refusal, "changed-unreviewed-workflow"):
+            self.plan()
+        self.assertFalse((self.directory / "out").exists())
+
+    def test_generated_guard_at_head_and_unrelated_local_edits_remain_allowed(self):
+        filename = self.root / ".github" / "workflows" / "deploy.yml"
+        filename.write_bytes(transform().encode())
+        self.head = self.commit_target()
+        (self.root / "unrelated.txt").write_text("local changes")
+        self.assertEqual(self.plan()["candidatePublicationRoutes"], 0)
 
     def test_nested_external_workflow_uses_source_context_but_actions_use_workspace(self):
         import base64
