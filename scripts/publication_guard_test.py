@@ -94,6 +94,13 @@ class TransformationTests(unittest.TestCase):
         self.assertIn("# preserve need comment", generated)
         self.assertIn("(always() && needs.build.result == 'success')", generated)
 
+    def test_metadata_job_overrides_inherited_working_directory(self):
+        source = SOURCE.replace("shell: pwsh", "shell: pwsh\n    working-directory: terraform")
+        generated, _ = installer.parse(transform(source, declaration(source)))
+        self.assertEqual(generated["defaults"]["run"]["working-directory"], "terraform")
+        self.assertEqual(generated["jobs"][installer.JOB]["defaults"]["run"]["working-directory"],
+                         "${{ github.workspace }}")
+
     def test_missing_if_and_needs_retain_success_semantics(self):
         source = "on:\n  workflow_dispatch:\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo synthetic\n"
         after, _ = installer.parse(transform(source, declaration(source)))
@@ -294,6 +301,16 @@ class PlanningTests(unittest.TestCase):
             self.plan()
         self.assertFalse((self.directory / "out").exists())
 
+    def test_workflow_added_during_metadata_recheck_refused(self):
+        def recheck(*_):
+            if self.fresh.call_count == 2:
+                (self.root / ".github" / "workflows" / "new.yml").write_text(SOURCE)
+            return "2973523"
+        self.fresh.side_effect = recheck
+        with self.assertRaisesRegex(installer.Refusal, "new-or-missing-workflow"):
+            self.plan()
+        self.assertFalse((self.directory / "out").exists())
+
     def test_inherited_floating_and_owned_runtime_sources_must_still_match(self):
         use = "owner/shared@v1"
         effects = [{"kind": "primitive", "uses": use, "sourceSha": "a" * 40, "chain": []}]
@@ -354,6 +371,38 @@ class PlanningTests(unittest.TestCase):
                         else:
                             github.assert_called_once_with(
                                 f"repos/owner/shared/contents/{path}?ref=" + "a" * 40)
+
+    def test_nested_external_workflow_uses_source_context_but_actions_use_workspace(self):
+        import base64
+        sha = "a" * 40
+        shared_path = ".github/workflows/release.yml"
+        child_path = ".github/workflows/child.yml"
+        shared = ("on:\n  workflow_call:\njobs:\n  nested:\n    uses: ./" + child_path +
+                  "\n  local:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./workspace-action\n")
+        child = "on:\n  workflow_call:\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo child\n"
+        action = "runs:\n  using: composite\n  steps:\n    - run: echo local\n      shell: bash\n"
+        local_path = self.root / "workspace-action" / "action.yml"
+        local_path.parent.mkdir()
+        local_path.write_bytes(action.encode())
+        source = "on:\n  push:\njobs:\n  publish:\n    uses: owner/shared/" + shared_path + "@" + sha + "\n"
+        self.manifest["workflows"] = [declaration(source)]
+        chain = [{"repository": repository, "path": path, "sourceSha": source_sha,
+                  "blobSha": installer.blob(content.encode())}
+                 for repository, path, source_sha, content in [
+                     ("owner/shared", shared_path, sha, shared),
+                     ("owner/shared", child_path, sha, child),
+                     (self.manifest["repository"], "workspace-action/action.yml", "b" * 40, action)]]
+        self.manifest["workflows"][0]["jobs"]["publish"]["effects"] = [
+            {"kind": "executor", "chain": [{}] + chain}]
+        def read(endpoint):
+            content = child if f"/{child_path}?" in endpoint else shared
+            return {"sha": installer.blob(content.encode()),
+                    "content": base64.b64encode(content.encode()).decode()}
+        with patch.object(installer, "github", side_effect=read):
+            installer.verify_sources(self.manifest, self.root)
+            chain[1]["sourceSha"] = "c" * 40
+            with self.assertRaisesRegex(installer.Refusal, "unbound-local-invocation"):
+                installer.verify_sources(self.manifest, self.root)
 
     def test_catalog_and_live_immutable_repository_identity(self):
         row = {"name": "synthetic", "github": {"visibility": "private",

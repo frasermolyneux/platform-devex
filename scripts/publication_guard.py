@@ -150,6 +150,9 @@ def guard_job(app_id):
     return f"""  {JOB}:
     name: Verify original publication origin
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{{{ github.workspace }}}}
     permissions:
       contents: read
       actions: read
@@ -386,12 +389,12 @@ def uses_in(document):
     for job in jobs.values():
         require(isinstance(job, dict), "ambiguous-job")
         if "uses" in job:
-            yield job["uses"]
+            yield job["uses"], "workflow"
         steps = steps + job.get("steps", [])
     for step in steps:
         require(isinstance(step, dict), "ambiguous-step")
         if "uses" in step:
-            yield step["uses"]
+            yield step["uses"], "action"
 
 
 def verify_sources(manifest, root):
@@ -415,14 +418,18 @@ def verify_sources(manifest, root):
                         identities[identity] = entry["blobSha"]
     resolved = {}
 
-    def resolve(use):
+    def resolve(use, containing_repository, containing_sha, kind):
         require(isinstance(use, str), "unclassified-invocation")
         if use.startswith("./"):
             relative = use[2:].rstrip("/")
             prefix = relative + "/" if relative else ""
+            expected_repository = containing_repository if kind == "workflow" else manifest["repository"]
+            candidates = {relative} if kind == "workflow" else {
+                relative, prefix + "action.yml", prefix + "action.yaml"}
             possible = [(repository, path, sha) for repository, path, sha in identities
-                        if repository == manifest["repository"] and
-                        path in {relative, prefix + "action.yml", prefix + "action.yaml"}]
+                        if repository == expected_repository and
+                        path in candidates and
+                        (kind != "workflow" or containing_sha is None or sha == containing_sha)]
             require(len(possible) == 1, "unbound-local-invocation")
             return
         match = re.fullmatch(r"([A-Za-z0-9_-]+/[A-Za-z0-9_.-]+)(/[A-Za-z0-9_./-]+)?@([A-Za-z0-9_./-]+)", use)
@@ -458,12 +465,12 @@ def verify_sources(manifest, root):
         require(blob(data) == expected_blob, "inherited-definition-changed")
         if path.endswith((".yml", ".yaml")):
             document, _ = parse(data.decode("utf8"))
-            for use in uses_in(document):
-                resolve(use)
+            for use, kind in uses_in(document):
+                resolve(use, repository, sha, kind)
     for workflow in manifest["workflows"]:
         document, _ = parse(workflow["content"])
-        for use in uses_in(document):
-            resolve(use)
+        for use, kind in uses_in(document):
+            resolve(use, manifest["repository"], None, kind)
     require(isinstance(manifest.get("runtimeSources"), list), "missing-runtime-source-declarations")
     for binding in manifest["runtimeSources"]:
         require(binding["repository"] == manifest["repository"], "foreign-runtime-source")
@@ -507,9 +514,11 @@ def plan(manifest_path, manifest_digest, worktree, output, catalog_sha, expected
     paths = [item["path"] for item in declarations]
     require(len(set(paths)) == len(paths) and all(WORKFLOW.fullmatch(item) for item in paths),
             "ambiguous-workflow-declarations")
-    live_paths = {path.relative_to(root).as_posix() for path in (root / ".github" / "workflows").iterdir()
-                  if path.suffix in {".yml", ".yaml"}}
-    require(live_paths == set(paths), "new-or-missing-workflow")
+    def workflow_paths():
+        return {path.relative_to(root).as_posix() for path in (root / ".github" / "workflows").iterdir()
+                if path.suffix in {".yml", ".yaml"}}
+
+    require(workflow_paths() == set(paths), "new-or-missing-workflow")
     verify_release()
     app_id = fresh_target(manifest, catalog_sha, expected_head, root)
     verify_sources(manifest, root)
@@ -537,6 +546,7 @@ def plan(manifest_path, manifest_digest, worktree, output, catalog_sha, expected
     fresh_target(manifest, catalog_sha, expected_head, root)
     verify_release()
     verify_sources(manifest, root)
+    require(workflow_paths() == set(paths), "new-or-missing-workflow")
     for path, text in snapshots.items():
         require(root.joinpath(*path.split("/")).read_bytes().decode("utf8") == text, "worktree-source-changed")
     receipt = {"schema": SCHEMA, "manifestDigest": manifest_digest, "catalogSha": catalog_sha,
