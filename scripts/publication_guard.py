@@ -191,6 +191,14 @@ def expression(original):
     return result
 
 
+def validate_dependency_expression(condition, dependencies):
+    unquoted = re.sub(r"'(?:[^']|'')*'", "''", condition)
+    for token in re.finditer(r"(?<![A-Za-z0-9_.-])needs\b", unquoted):
+        reference = re.match(r"needs\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", unquoted[token.start():])
+        require(reference is not None and reference[1] in dependencies,
+                "guard-cannot-preserve-aggregate-or-unbound-needs-condition")
+
+
 def transform(text, declaration, repository, app_id):
     expected, _ = parse(declaration["content"])
     routes = declaration["jobs"]
@@ -230,6 +238,7 @@ def transform(text, declaration, repository, app_id):
         fields = mapping(job_nodes[name][1])
         require("uses" in job or isinstance(job.get("steps"), list), "invalid-job-shape")
         old_if = expression(job.get("if", "success()"))
+        validate_dependency_expression(old_if, needs(job))
         new_if = f"${{{{ ({old_if}) && needs.{JOB}.result == 'success' && needs.{JOB}.outputs.publication-allowed == 'true' }}}}"
         new_needs = needs(job) + [JOB]
         additions = []
@@ -358,6 +367,8 @@ def fresh_target(manifest, catalog_sha, expected_head, root):
     row = json.loads(base64.b64decode(catalog["content"]), object_pairs_hook=no_duplicates)
     require(row["name"] == name and row["github"]["visibility"] == manifest["visibility"],
             "catalog-name-or-visibility-mismatch")
+    require(not row["github"].get("repository_analysis", {}).get("profile", {}).get("exemption"),
+            "catalog-target-is-exempt")
     metadata = github(f"repos/{manifest['repository']}")
     require(metadata["id"] == manifest["repositoryId"] and metadata["full_name"] == manifest["repository"] and
             metadata["visibility"] == manifest["visibility"] and

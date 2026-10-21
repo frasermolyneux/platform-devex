@@ -107,6 +107,22 @@ class TransformationTests(unittest.TestCase):
         self.assertEqual(after["jobs"]["publish"]["needs"], [installer.JOB])
         self.assertIn("(success())", after["jobs"]["publish"]["if"])
 
+    def test_added_guard_cannot_make_failed_or_skipped_original_dependencies_pass(self):
+        original_if = ("if: |\n      !failure() && !cancelled() &&\n"
+                       "      needs.build.result == 'success'")
+        for condition in ["always() && contains(needs.*.result, 'success')",
+                          "always() && contains(toJSON(needs), 'success')",
+                          "always() && needs.publication-origin.result == 'success'"]:
+            for failed_build in [SOURCE.replace("echo validation", "exit 1"),
+                                 SOURCE.replace("  build:\n", "  build:\n    if: false\n")]:
+                with self.subTest(condition=condition, skipped="if: false" in failed_build):
+                    source = failed_build.replace(original_if, "if: " + condition)
+                    with self.assertRaisesRegex(installer.Refusal, "aggregate-or-unbound-needs-condition"):
+                        transform(source, declaration(source))
+        source = SOURCE.replace(original_if,
+                                "if: ${{ always() && needs.build.result == 'success' && 'needs.*' != '' }}")
+        self.assertIn("needs.build.result == 'success'", transform(source, declaration(source)))
+
     def test_effectful_inherited_workflow_is_gated_without_changing_call(self):
         source = "on:\n  push:\njobs:\n  publish:\n    uses: owner/shared/.github/workflows/release.yml@" + "a" * 40 + "\n    secrets: inherit\n"
         after, _ = installer.parse(transform(source, declaration(source)))
@@ -495,6 +511,13 @@ class PlanningTests(unittest.TestCase):
         with patch.object(installer, "github", side_effect=responses), patch.object(
                 installer, "command", side_effect=["b" * 40, "https://github.com/frasermolyneux/synthetic.git"]):
             self.assertEqual(installer.fresh_target(self.manifest, "a" * 40, "b" * 40, self.root), "2973523")
+        exempt_row = copy.deepcopy(row)
+        exempt_row["github"]["repository_analysis"] = {"profile": {"exemption": {"reason": "Explicit exemption"}}}
+        changed = copy.deepcopy(responses)
+        changed[2]["content"] = base64.b64encode(json.dumps(exempt_row).encode()).decode()
+        with patch.object(installer, "github", side_effect=changed):
+            with self.assertRaisesRegex(installer.Refusal, "catalog-target-is-exempt"):
+                installer.fresh_target(self.manifest, "a" * 40, "b" * 40, self.root)
         for change in [{"id": 2}, {"visibility": "public"}, {"full_name": "other/synthetic"},
                        {"archived": True}, {"fork": True}]:
             changed = copy.deepcopy(responses)
