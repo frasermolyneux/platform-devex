@@ -130,6 +130,30 @@ class TransformationTests(unittest.TestCase):
         self.assertEqual(after["jobs"]["publish"]["secrets"], "inherit")
         self.assertEqual(after["jobs"]["publish"]["needs"], [installer.JOB])
 
+    def test_step_and_other_embedded_dependency_conditions_keep_original_scope(self):
+        original_if = ("if: |\n      !failure() && !cancelled() &&\n"
+                       "      needs.build.result == 'success'")
+        for condition in ["contains(needs.*.result, 'success')",
+                          "${{ contains(needs.*.result, 'success') }}"]:
+            for failed_build in [SOURCE.replace("echo validation", "exit 1"),
+                                 SOURCE.replace("  build:\n", "  build:\n    if: false\n")]:
+                source = failed_build.replace(original_if, "if: always()")
+                source = source.replace("- run: echo publication",
+                                        "- if: " + condition + "\n        run: echo publication")
+                with self.subTest(condition=condition, skipped="if: false" in failed_build):
+                    with self.assertRaisesRegex(installer.Refusal, "aggregate-or-unbound-needs-condition"):
+                        transform(source, declaration(source))
+        for replacement in [
+            "env:\n      PERMIT: ${{ contains(needs.*.result, 'success') }}\n    steps:\n      - run: echo publication",
+            "steps:\n      - run: echo '${{ toJSON(needs) }}'",
+            "steps:\n      - run: echo \"${{ format('}} {0}', needs.*.result) }}\"",
+        ]:
+            source = SOURCE.replace("steps:\n      - run: echo publication", replacement)
+            with self.assertRaises(installer.Refusal):
+                transform(source, declaration(source))
+        source = SOURCE.replace("echo publication", "echo '${{ needs.build.result }}'")
+        self.assertIn("echo '${{ needs.build.result }}'", transform(source, declaration(source)))
+
     def test_crlf_and_no_final_newline(self):
         source = SOURCE.replace("\n", "\r\n").rstrip("\r\n")
         generated = transform(source, declaration(source))

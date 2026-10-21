@@ -193,10 +193,27 @@ def expression(original):
 
 def validate_dependency_expression(condition, dependencies):
     unquoted = re.sub(r"'(?:[^']|'')*'", "''", condition)
+    require("'" not in unquoted.replace("''", ""), "ambiguous-dependency-expression")
     for token in re.finditer(r"(?<![A-Za-z0-9_.-])needs\b", unquoted):
         reference = re.match(r"needs\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", unquoted[token.start():])
         require(reference is not None and reference[1] in dependencies,
                 "guard-cannot-preserve-aggregate-or-unbound-needs-condition")
+
+
+def validate_job_dependency_expressions(value, dependencies):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "if" and isinstance(item, str):
+                validate_dependency_expression(expression(item), dependencies)
+            validate_job_dependency_expressions(item, dependencies)
+    elif isinstance(value, list):
+        for item in value:
+            validate_job_dependency_expressions(item, dependencies)
+    elif isinstance(value, str):
+        embedded = re.findall(r"\$\{\{(.*?)\}\}", value, re.DOTALL)
+        require(len(embedded) == value.count("${{"), "ambiguous-dependency-expression")
+        for condition in embedded:
+            validate_dependency_expression(condition, dependencies)
 
 
 def transform(text, declaration, repository, app_id):
@@ -238,7 +255,7 @@ def transform(text, declaration, repository, app_id):
         fields = mapping(job_nodes[name][1])
         require("uses" in job or isinstance(job.get("steps"), list), "invalid-job-shape")
         old_if = expression(job.get("if", "success()"))
-        validate_dependency_expression(old_if, needs(job))
+        validate_job_dependency_expressions(job, needs(job))
         new_if = f"${{{{ ({old_if}) && needs.{JOB}.result == 'success' && needs.{JOB}.outputs.publication-allowed == 'true' }}}}"
         new_needs = needs(job) + [JOB]
         additions = []
