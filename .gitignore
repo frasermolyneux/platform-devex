@@ -1,1 +1,8 @@
 node_modules/
+publication-inventory/
+publication-stage/
+publication-helper-contract/
+.publication-origin-contract/
+.publication-guard-test-*/
+scripts/__pycache__/
+.installer-evidence/
