@@ -194,9 +194,10 @@ def expression(original):
 def validate_dependency_expression(condition, dependencies):
     unquoted = re.sub(r"'(?:[^']|'')*'", "''", condition)
     require("'" not in unquoted.replace("''", ""), "ambiguous-dependency-expression")
-    for token in re.finditer(r"(?<![A-Za-z0-9_.-])needs\b", unquoted):
-        reference = re.match(r"needs\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", unquoted[token.start():])
-        require(reference is not None and reference[1] in dependencies,
+    for token in re.finditer(r"(?<![A-Za-z0-9_.-])needs\b", unquoted, re.IGNORECASE):
+        reference = re.match(r"needs\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)",
+                             unquoted[token.start():], re.IGNORECASE)
+        require(reference is not None and reference[1].casefold() in {item.casefold() for item in dependencies},
                 "guard-cannot-preserve-aggregate-or-unbound-needs-condition")
 
 

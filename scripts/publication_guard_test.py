@@ -133,7 +133,7 @@ class TransformationTests(unittest.TestCase):
     def test_step_and_other_embedded_dependency_conditions_keep_original_scope(self):
         original_if = ("if: |\n      !failure() && !cancelled() &&\n"
                        "      needs.build.result == 'success'")
-        for condition in ["contains(needs.*.result, 'success')",
+        for condition in ["contains(needs.*.result, 'success')", "contains(NEEDS.*.result, 'success')",
                           "${{ contains(needs.*.result, 'success') }}"]:
             for failed_build in [SOURCE.replace("echo validation", "exit 1"),
                                  SOURCE.replace("  build:\n", "  build:\n    if: false\n")]:
