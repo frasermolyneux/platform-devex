@@ -419,9 +419,10 @@ def verify_sources(manifest, root):
         require(isinstance(use, str), "unclassified-invocation")
         if use.startswith("./"):
             relative = use[2:].rstrip("/")
+            prefix = relative + "/" if relative else ""
             possible = [(repository, path, sha) for repository, path, sha in identities
                         if repository == manifest["repository"] and
-                        path in {relative, relative + "/action.yml", relative + "/action.yaml"}]
+                        path in {relative, prefix + "action.yml", prefix + "action.yaml"}]
             require(len(possible) == 1, "unbound-local-invocation")
             return
         match = re.fullmatch(r"([A-Za-z0-9_-]+/[A-Za-z0-9_.-]+)(/[A-Za-z0-9_./-]+)?@([A-Za-z0-9_./-]+)", use)
@@ -435,8 +436,9 @@ def verify_sources(manifest, root):
         if use in primitives:
             require(primitives[use] == {source_sha}, "primitive-reference-changed")
             return
+        prefix = path + "/" if path else ""
         possible = [(owner, source_path, sha) for owner, source_path, sha in identities if owner == repository and
-                    source_path in {path, path + "/action.yml", path + "/action.yaml"} and sha == source_sha]
+                    source_path in {path, prefix + "action.yml", prefix + "action.yaml"} and sha == source_sha]
         require(len(possible) == 1, "inherited-reference-changed-or-unbound")
 
     for identity, expected_blob in identities.items():

@@ -330,6 +330,31 @@ class PlanningTests(unittest.TestCase):
             with self.assertRaisesRegex(installer.Refusal, "inherited-reference-changed-or-unbound"):
                 installer.verify_sources(self.manifest, self.root)
 
+    def test_root_local_and_external_composite_sources_bind(self):
+        import base64
+        shared = "name: Root composite\nruns:\n  using: composite\n  steps:\n    - run: echo reviewed\n      shell: bash\n"
+        for local in [True, False]:
+            for path in ["action.yml", "action.yaml"]:
+                with self.subTest(local=local, path=path):
+                    repository = self.manifest["repository"] if local else "owner/shared"
+                    use = "./" if local else "owner/shared@" + "a" * 40
+                    source = SOURCE.replace("- run: echo publication", "- uses: " + use)
+                    self.manifest["workflows"] = [declaration(source)]
+                    self.manifest["workflows"][0]["jobs"]["publish"]["effects"] = [
+                        {"kind": "executor", "chain": [{}, {
+                            "repository": repository, "path": path,
+                            "sourceSha": "a" * 40, "blobSha": installer.blob(shared.encode())}]}]
+                    (self.root / path).write_bytes(shared.encode())
+                    response = {"sha": installer.blob(shared.encode()),
+                                "content": base64.b64encode(shared.encode()).decode()}
+                    with patch.object(installer, "github", return_value=response) as github:
+                        installer.verify_sources(self.manifest, self.root)
+                        if local:
+                            github.assert_not_called()
+                        else:
+                            github.assert_called_once_with(
+                                f"repos/owner/shared/contents/{path}?ref=" + "a" * 40)
+
     def test_catalog_and_live_immutable_repository_identity(self):
         row = {"name": "synthetic", "github": {"visibility": "private",
                                               "github_app": {"enabled": True, "app_id": "2973523"}}}
