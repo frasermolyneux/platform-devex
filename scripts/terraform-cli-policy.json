@@ -3,5 +3,192 @@
   "approvedTarget": "1.17.0",
   "approvedMinor": "1.17",
   "approval": "Owner approved Terraform 1.17.0 (21 October 2026), built with Go 1.26.10 including CVE-2026-111943 fix, with compatible 1.17 patch PRs only. Future minors require policy review. Vendor feature/advisory scope still requires review.",
-  "compatibility": {}
+  "compatibility": {
+    "frasermolyneux/craftpledge/terraform": {
+      "sourceDigest": "5ccbf7f6ca6852c1a7787ecd82cd1a78c2262e51d3339ece8d648b786049e404",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source c1b57d0708c20b21b8a352e34c1f77e16048a832: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/demo-manager/terraform": {
+      "sourceDigest": "8ba9d211aa1a3e7643b7cda914022db2a323bf87b282ab16b6e0436a133821ee",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source f14c6053f661091a3269536588e95e2edcd8b51d: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/geo-location/terraform": {
+      "sourceDigest": "4a6a573f38c53a6e9ebd5d553e103c4e933b1a891addad241009c7602f6692be",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 7139ba241fe6bc1107d8a6bf8649709ac50e21b7: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/molyneux-me/terraform": {
+      "sourceDigest": "ce16fd36250e070f24be00e000faa5257070315431ff2a7567bc722c541459ff",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 8cc5fdc215c71d84e5e50ca8af265bda5970de95: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-baremetal/terraform": {
+      "sourceDigest": "9e65362b42d71fab3f6ded6307cafc2f115bdbd57ee921f60839a01081860939",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source f5a96991e1acd9abda29f248bb5063402ae63377: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-connectivity/terraform": {
+      "sourceDigest": "21e4aa8564bc9c83f59baefd28700276efb6e57abf761711021cdc10b6fe809a",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 2f79c162370cc72c5592891e9541072c7d76e93f: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-hosting/terraform": {
+      "sourceDigest": "8d9b64b34191054f2b8d71a8ac8071b86b3a9a5444caab5f840557434135a35d",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 7c12c03183beb92dd3a6edc7cecf6e617446b3c2: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-landing-zones/terraform": {
+      "sourceDigest": "c8ddfa887f76eb0ca13238baff16edd20ca22e7d117936d138f5f53a5d55e335",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 60c88bf288692565864e3a1b1a63e4a2d08619c5: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-monitoring/terraform": {
+      "sourceDigest": "a5e0733f2ffc5f26b6d9058e6aea36e394b8c097afe9bea51fc6b3c2c2ef5a76",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 32de5a9341535e45ccc96ab163a6cd5ad1032957: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-monitoring/terraform-sub": {
+      "sourceDigest": "a5e0733f2ffc5f26b6d9058e6aea36e394b8c097afe9bea51fc6b3c2c2ef5a76",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 32de5a9341535e45ccc96ab163a6cd5ad1032957: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-notifications/terraform": {
+      "sourceDigest": "02d295fa876ec62808c737b009d5e8ce0cecf36ac4a0b01ac1993643791751a7",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source a57d73936fa577234408d62b2c1d50757fc07dc4: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-radar/terraform": {
+      "sourceDigest": "d7fb774b468adbd66d3a3e6b08786f44dd4c2fea76f81a9e01c32c65df16d737",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 71fe8e0f9f1ce9e61346ac75533e06b1b262a778: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-registry/terraform": {
+      "sourceDigest": "5e3f4811d1b5fd55c8ee5100cdb76d0e29ad2b1a1401b716467f4786746e441e",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source af02cf4cc0baef29dddfbd8d656f6ef34ca04620: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-sitewatch-func/terraform": {
+      "sourceDigest": "6dad124327f9233b3a627e3d255afdc4065f34a9b63c265bd8a1e3b0ab71404a",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 18d617e3f334f929288e0650adc382b147dacb37: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-status-web/edge": {
+      "sourceDigest": "6ab6bbc33274435794a15d79a4c6c44720ef5ad3698b36e906fa61b06beb9e48",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source a0751c75be1c70c0fce329d8e90905502b1cc939: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-status-web/terraform": {
+      "sourceDigest": "6ab6bbc33274435794a15d79a4c6c44720ef5ad3698b36e906fa61b06beb9e48",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source a0751c75be1c70c0fce329d8e90905502b1cc939: sole root required_version >= 1.14.3; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/platform-workloads/terraform": {
+      "sourceDigest": "f5ed3d7585ac315a4224955b63f49fea7f68b33dc82254f3c4b8e513bba32699",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 9125e392504662e842b53609f2d2a2eb0c931193: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-cod4x-plugin/terraform": {
+      "sourceDigest": "4084f27ef767b036e5a237053c266bf1b748d5e28eb3f454abb7b749b9483021",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source e8d2cacfbb3bb6553371d7468bedf9e8fb883a6c: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-core/terraform": {
+      "sourceDigest": "5d362b8f79a3c61ce1af4da034d7f16229b497321cc8d83f71c06c5ac3db2306",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 1339afbffddb3b1472153a369909f27f90c14823: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-environments/terraform": {
+      "sourceDigest": "a03d5223e4a11d16be032abb5aeeeca6d289d43b59c1b46bf9437192c3779582",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source c64916090f3b7c1c696da3fd787a574f047d3f7d: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-repository/terraform": {
+      "sourceDigest": "754519a9d576d09f7cbd27cb7bded4bf872ce81bdce952f9ea230faa3502c937",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 13604448afc0b840cee296f75dd64db9b5c58849: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-repository-func/terraform": {
+      "sourceDigest": "17964d1fc3d1489d5aee926d80a10de64fcc0e72e73e00f1ca1bf92407801452",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 2be5fe0031ba2dbf08a27f27120e648a1fa16376: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-server-agent/terraform": {
+      "sourceDigest": "9e2c4a4df815e1f3ab3e1668601efd567d89286ccbc049a0e814616ceeeed6ce",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source e9a8e3f56f6e3c0882e1715924ae1e1b5c930697: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-server-events/terraform": {
+      "sourceDigest": "7f656d596b5a33eeecc933fe2e85a56758eece8f38a2ac75bd8b346eddc4c3ea",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source a3441ca63fb09e7a1c2fc06ec66bf5603a2de544: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-servers-integration/terraform": {
+      "sourceDigest": "5bce7c1ecba00a137551bbd24b55ebebf8fa89dc5990f0636e4837a05a00d82c",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 39ef78789bef867fe216f7da584f3afbf753a645: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-sync/terraform": {
+      "sourceDigest": "0df1cbdad5804ec21e806ba1bd3cab1c07283dd6ff48b1ef83603395d28ddf18",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 9d7ed2c3f05d4cdef061b557af1cb6e6176053b3: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/portal-web/terraform": {
+      "sourceDigest": "abf597da91886ba587d0077c9146ae3bf269aeb344362e6aacd21d61af997523",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source f2e3a7d392ee64e7dfbf8b50edd7cf17183e92c3: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/talkwithtiles/terraform": {
+      "sourceDigest": "1352eba685ac9c0a672a4c1ea7228c0a1ef2f0e4b5fd736fb555dfc768e7907b",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 4dce93d6b4498de94543d3c1364bdbce2bcf37e1: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/travel-itinerary/terraform": {
+      "sourceDigest": "b123dd9d89d8a0d151058bc40adf18c31f2581dfb82d4cdd8ba694b41aea64c9",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 8ef1b06b51779633a10f9f109aaf80c6766c9b72: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/trip-side-kick/terraform": {
+      "sourceDigest": "0bb69843945053a0cae1c0b32ea515ca7d8b8546050ff730707e739822dcf22b",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source 6c4efc2feda7950b19777a985055b11022d60592: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    },
+    "frasermolyneux/twenty-one/terraform": {
+      "sourceDigest": "266d4e8774acca85bf9f02fd3cabc43b6d4d8db08972640b04f03fa053891bfd",
+      "reviewedMinor": "1.17",
+      "allowedTargets": [],
+      "rationale": "Parent-reviewed source f72b16b8cf95c998c3906262b6b0455073792d43: sole root required_version >= 1.15.6; no modules, overrides or TF JSON. Static 1.17 patch compatibility only; no production/state-plan approval."
+    }
+  }
 }

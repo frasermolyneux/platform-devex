@@ -9,8 +9,9 @@ machinery, changes merge identities, auto-merges, or deploys.
 ## Approval before activation
 
 The committed `scripts/terraform-cli-policy.json` records the owner-approved
-baseline **1.17.0** (21 October 2026) and `approvedMinor: "1.17"`, with no
-root compatibility reviews yet. The owner reviewed its Go 1.26.10 build and
+baseline **1.17.0** (21 October 2026) and `approvedMinor: "1.17"`, with
+31 source-bound root compatibility reviews across 29 consumer repositories.
+The owner reviewed its Go 1.26.10 build and
 CVE-2026-111943 fix; that is not a blanket claim about every advisory/feature.
 The explicit estate rollout request and release review authorize this central
 baseline/minor policy. They do **not** prove source compatibility for every root
@@ -117,12 +118,32 @@ Validation and actual root plans are separate, current-head acceptance evidence
 before human merge. Attach real commands, outcomes and CI/run links when those
 checks have completed; never substitute a planned/running check for success.
 
-The committed compatibility map remains empty: no complete immutable root/module
-source review was supplied or independently verified here. Thus all discovered
-roots remain unapproved for a future pin change. This does not block read-only
-discovery or an already-current pin, and does not discard the central 1.17 approval.
-The parent can populate entries from the rollout's reviewed source snapshots
-without inventing or waiting for state-plan results.
+### Reviewed estate source snapshot
+
+On 25 October 2026 the parent completed the separate source review and supplied
+`terraform-cli-static-compatibility-proof.json`, SHA-256
+`debc17a031efe2f0926afe10c321e94c05df1c157cb284a849d1da7b76d50d8a`.
+It records 29 immutable repository commits, 31 roots and 464 Terraform source
+path/mode/blob identities. Each complete GitHub tree at those commits was read
+and admitted using this controller's `rootSources`; every supplied Terraform
+identity and declared root matched. All sources are regular `100644` files within
+the declared roots; the complete trees passed the symlink/submodule refusal.
+Digests were recomputed with the controller's canonical `sourceDigest` algorithm.
+
+The parent's full source review found exactly one `required_version` per root:
+`>= 1.15.6`, except `platform-status-web/terraform` retains `>= 1.14.3`.
+There are no module blocks, override files, Terraform JSON files or additional
+narrowing constraints. Those reviewed requirements admit every stable 1.17 patch.
+The committed `compatibility` map therefore has 31 `reviewedMinor: "1.17"`
+entries; each rationale records its actual source commit, constraint, absence
+of modules/overrides/JSON and static-only conclusion. This is source-review
+approval, **not production compatibility or state-backed plan approval**.
+
+These entries apply once the consumer default branches contain the reviewed
+source identities. Merge commits and pin/lock/tfvars-only changes do not alter
+the digest. Any tracked `.tf`/`.tf.json` change still invalidates the affected
+repository's reviews; new roots and repositories require their own review.
+No approval is granted to `actions` or other new test/sample roots.
 
 ### Baseline validation evidence
 
@@ -134,11 +155,12 @@ and 31 provider-lock SHA-256 values. It is baseline validation evidence, not an
 execution by this controller, source-bound whole-minor approval or a state-backed
 plan. The snapshot contains no immutable source commit or compatibility digest.
 
-Keep its non-green details visible: formatting passes for 30 roots;
-`demo-manager/terraform` reports `tfvars\prd.tfvars` formatting differences.
-`platform-workloads/terraform` and `trip-side-kick/terraform` each report one
-warning. The parent owns follow-up validation evidence and state-backed plans;
-do not turn these records into a claim that all checks/plans passed.
+The parent subsequently confirmed all 31 current root formatting checks pass;
+the historical `demo-manager` tfvars formatting difference was fixed separately
+without a semantic change. Do not treat the old snapshot's 30/31 formatting flag
+as a current failure. Its two warning records remain historical diagnostics,
+not state-plan evidence. The parent owns current-head validation and state-backed
+plans; none are fabricated by the compatibility approvals above.
 
 ## Discovery and permissions
 
@@ -225,7 +247,7 @@ the actual native scheduler, not an ops-clock-document trigger. The owner-approv
 repository variable `TF_CLI_UPDATES_ENABLED=true` has been registered, so Sunday
 runs are admitted to propose updates once this workflow is on the default branch.
 They still require current source-bound compatibility approval, ownership/race
-checks and human merge; an empty approval map cannot authorize a pin change.
+checks and human merge; unknown or changed source reviews cannot authorize a pin change.
 Setting that variable to `false` pauses scheduled writes while retaining read-only
 discovery; it does not remove the cron. Manual dispatch defaults to dry run:
 
@@ -241,8 +263,9 @@ before checkout or App token minting; rejected refs cannot publish audit comment
 Start with the
 single-repository dry run, inspect its artifacts/activity-log summary, then run
 discovery across the installation. An estate rollout merged at the selected
-target should report `current`, no changed paths and `compatibility: "unknown"`
-for unreviewed roots. A root needing an edit without approval reports `blocked`;
+target should report `current`, no changed paths and `compatibility: "reviewed"`
+for each of the 31 roots whose source identities still match. Unreviewed roots
+remain `compatibility: "unknown"`. A root needing an edit without approval reports `blocked`;
 it must not propose a PR. Repositories without pins report `not-applicable`.
 No target branches, commits or PRs should be written; the controller's own
 activity-log comment is expected.
