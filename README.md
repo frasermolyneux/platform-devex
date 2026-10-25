@@ -1,8 +1,32 @@
 # platform-devex
 
+[![Approve Trusted Pending Workflow Runs](https://github.com/frasermolyneux/platform-devex/actions/workflows/approve-copilot-runs.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/approve-copilot-runs.yml)
+[![Continuous Improvement](https://github.com/frasermolyneux/platform-devex/actions/workflows/continuous-improvement.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/continuous-improvement.yml)
+[![Delegate Failed Pull Request Checks](https://github.com/frasermolyneux/platform-devex/actions/workflows/delegate-failed-checks.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/delegate-failed-checks.yml)
+[![Publication installer tests](https://github.com/frasermolyneux/platform-devex/actions/workflows/publication-installer-tests.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/publication-installer-tests.yml)
+[![Sweep Stale Pull Request Branches](https://github.com/frasermolyneux/platform-devex/actions/workflows/stale-branches.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/stale-branches.yml)
+[![Reviewed Terraform CLI Updates](https://github.com/frasermolyneux/platform-devex/actions/workflows/terraform-cli-updates.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/terraform-cli-updates.yml)
+
 Internal developer platform automation: separate maintenance workflows for PR branch updates,
 Copilot delegation and trusted pending workflow runs, plus opt-in continuous improvement across
 frasermolyneux repositories.
+
+## Documentation
+
+- [Reviewed Terraform CLI updates](docs/terraform-cli-updates.md) — approval policy,
+  scoped permissions, dry runs, schedule, race handling and human merge requirements.
+
+## Reviewed Terraform CLI maintenance
+
+`.github/workflows/terraform-cli-updates.yml` discovers active nonfork App-installed
+repositories and every valid pinned Terraform root, including `terraform-sub` and
+`edge`. It proposes at most one bounded, App-authored CLI-pin PR per repository.
+Targets and exact-source compatibility require central human approval; release
+discovery cannot widen the approved minor policy. The owner has admitted the
+native Sunday 00:37 UTC schedule, effective after default-branch merge; per-root
+compatibility still gates every proposal. Manual runs default to dry run.
+Dependabot retains provider/module ownership. This controller never runs target
+code, changes workflows or merge/publication controls, auto-merges or deploys.
 
 ## Estate analysis alignment
 
