@@ -168,6 +168,10 @@ Unpinned roots are not bootstrapped: the estate standards rollout owns their
 initial pins/locks. Symlinks, unsafe locations, invalid exact pins, more than 32
 roots, 512 direct source files per root or 2,048 repository Terraform sources
 fail closed. Repository Terraform sources must be regular files, not symlinks.
+Any tracked repository symlink or git submodule also blocks a pinned repository:
+directory indirections can hide local-module sources outside the reviewed tree.
+This conservative refusal also covers indirections unrelated to a particular root;
+flatten/vendor the reviewed sources or reconcile manually instead of bypassing it.
 Metadata responses are bounded
 to 2 MiB, pin blobs to 64 bytes, API calls to 30 seconds and paginated collections
 to ten pages. Jobs have explicit timeouts.
@@ -228,7 +232,10 @@ gh workflow run terraform-cli-updates.yml --repo frasermolyneux/platform-devex -
 ```
 
 Run these only after the workflow has merged to the default branch; a feature
-branch dispatch is not a substitute for production admission. Start with the
+branch dispatch is not a substitute for production admission. The first discovery
+step rejects every non-default-branch ref, including explicit writer dispatches,
+before checkout or App token minting; rejected refs cannot publish audit comments.
+Start with the
 single-repository dry run, inspect its artifacts/activity-log summary, then run
 discovery across the installation. An estate rollout merged at the selected
 target should report `current`, no changed paths and `compatibility: "unknown"`

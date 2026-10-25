@@ -79,6 +79,9 @@ export function rootSources(tree) {
   }
   const pins = tree.tree.filter((item) => item.path === ".terraform-version" || item.path.endsWith("/.terraform-version"));
   requireThat(pins.length <= MAX_ROOTS, "Too many Terraform roots");
+  requireThat(pins.length === 0 || tree.tree.every((item) =>
+    item.mode !== "120000" && item.mode !== "160000" && item.type !== "commit"),
+  "Unsafe repository symlink or submodule; compatibility sources incomplete");
   const compatibilityFiles = tree.tree.filter((item) => item.path.endsWith(".tf") || item.path.endsWith(".tf.json"))
     .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   requireThat(pins.length === 0 || compatibilityFiles.length <= MAX_SOURCE_FILES &&

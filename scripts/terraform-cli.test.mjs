@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import { BRANCH, MARKER, GitHubApi, checkSnapshot, compareVersions, discoverRepositories, pinVersion,
   planUpdate, reconcile, rootSources, selectTarget, sourceDigest, stableReleases, validatePolicy } from "./terraform-cli.mjs";
 
@@ -170,6 +171,21 @@ test("local-module-only changes invalidate compatibility instead of authorizing 
   assert.equal(f.state.writes.length, 0);
   moduleFile.mode = "120000";
   await assert.rejects(run(f, { dryRun: false }), /compatibility sources/);
+});
+
+test("directory symlinks and module gitlinks cannot bypass reviewed source completeness", async () => {
+  for (const entry of [
+    { ...file("modules/shared"), mode: "120000" },
+    { ...file("modules/shared"), mode: "160000", type: "commit" },
+  ]) {
+    const f = fixture();
+    assert.equal((await run(f)).status, "would-propose");
+    f.state.baseTree.tree.push(entry);
+    await assert.rejects(run(f, { dryRun: false }), /Unsafe repository symlink or submodule/);
+    entry.sha = "1".repeat(40);
+    await assert.rejects(run(f, { dryRun: false }), /Unsafe repository symlink or submodule/);
+    assert.equal(f.state.writes.length, 0);
+  }
 });
 
 test("dry-run reports immutable review evidence without treating current pins as compatibility approval", async () => {
@@ -364,6 +380,20 @@ test("failed checks and latest commit statuses are reported without merge or dep
   f.state.statuses.push({ id: 3, context: "plan", state: "error" });
   assert.equal((await checkSnapshot(f.api, repository, newSha)).state, "failed");
   assert.equal(f.state.writes.length, 0);
+});
+
+test("workflow rejects unreviewed refs before checkout or App minting, including explicit writer dispatch", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/terraform-cli-updates.yml", import.meta.url), "utf8");
+  const script = workflow.match(/node --input-type=module -e '([^']+)'/)[1];
+  const admit = (ref, branch) => runInNewContext(script, { process: { env: { RUN_REF: ref, DEFAULT_BRANCH: branch } } });
+  assert.doesNotThrow(() => admit("refs/heads/main", "main"));
+  assert.doesNotThrow(() => admit("refs/heads/release/default", "release/default"));
+  for (const ref of ["refs/heads/feature/unmerged-policy", "refs/tags/main", "", undefined]) {
+    assert.throws(() => admit(ref, "main"), /reviewed default branch/);
+  }
+  assert.throws(() => admit("refs/heads/main", undefined), /reviewed default branch/);
+  assert.ok(workflow.indexOf("Require reviewed default branch") < workflow.indexOf("actions/checkout@"));
+  assert.ok(workflow.indexOf("Require reviewed default branch") < workflow.indexOf("actions/create-github-app-token@"));
 });
 
 test("scheduled/manual writer admission stays opt-in; no target checkout, workflow permission or merge primitive", async () => {
