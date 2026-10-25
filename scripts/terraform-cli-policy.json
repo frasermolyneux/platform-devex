@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "approvedTarget": "1.17.0",
+  "approvedMinor": "1.17",
+  "approval": "Owner approved Terraform 1.17.0 (21 October 2026), built with Go 1.26.10 including CVE-2026-111943 fix, with compatible 1.17 patch PRs only. Future minors require policy review. Vendor feature/advisory scope still requires review.",
+  "compatibility": {}
+}
