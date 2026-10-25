@@ -99,11 +99,14 @@ test("detects every pinned root, including repository root, terraform-sub, edge 
   assert.deepEqual(rootSources(tree(file("terraform/unpinned.tf"))), []);
   assert.equal(roots.length, 5);
   assert.ok(roots.every((root) => root.files.length === 2));
+  assert.ok(roots.every((root) => root.compatibilityFiles.length === 10));
   assert.notEqual(sourceDigest(roots[0].files), sourceDigest(roots[1].files));
   assert.throws(() => rootSources({ ...tree(...entries), truncated: true }), /Incomplete/);
   assert.throws(() => rootSources(tree(file("terraform/.terraform-version"))), /no bounded/);
   assert.throws(() => rootSources(tree(...entries, entries[0])), /Invalid repository tree/);
-  assert.throws(() => rootSources(tree(file("terraform/.terraform-version"), { ...file("terraform/providers.tf"), mode: "120000" })), /regular/);
+  assert.throws(() => rootSources(tree(file("terraform/.terraform-version"), file("terraform/providers.tf"),
+    ...Array.from({ length: 2048 }, (_, index) => file(`modules/shared/source-${index}.tf`)))), /oversized/);
+  assert.throws(() => rootSources(tree(file("terraform/.terraform-version"), { ...file("terraform/providers.tf"), mode: "120000" })), /compatibility sources/);
   assert.throws(() => rootSources(tree({ ...file("terraform/.terraform-version"), mode: "120000" }, file("terraform/a.tf"))), /Unsafe/);
 });
 
@@ -152,13 +155,50 @@ test("any root source/override identity change invalidates compatibility review"
   assert.equal(f.state.writes.length, 0);
 });
 
+test("local-module-only changes invalidate compatibility instead of authorizing incompatible pin PRs", async () => {
+  const f = fixture();
+  const moduleFile = file("modules/shared/versions.tf", "f".repeat(40));
+  f.state.baseTree.tree.push(moduleFile);
+  f.policy.compatibility[`${repository}/terraform`].sourceDigest =
+    sourceDigest([moduleFile, file("terraform/providers.tf")]);
+  assert.equal((await run(f)).status, "would-propose");
+  moduleFile.sha = "1".repeat(40);
+  const blocked = await run(f, { dryRun: false });
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.roots[0].compatibility, "unknown");
+  assert.match(blocked.blocked[0], /unknown or incompatible/);
+  assert.equal(f.state.writes.length, 0);
+  moduleFile.mode = "120000";
+  await assert.rejects(run(f, { dryRun: false }), /compatibility sources/);
+});
+
+test("dry-run reports immutable review evidence without treating current pins as compatibility approval", async () => {
+  const f = fixture();
+  f.policy.compatibility = {};
+  const blocked = await run(f);
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.baseSha, baseSha);
+  assert.equal(blocked.roots[0].sourceDigest, sourceDigest([file("terraform/providers.tf")]));
+  assert.equal(blocked.roots[0].compatibility, "unknown");
+  const get = f.api.get;
+  f.api.get = (endpoint) => endpoint.endsWith(`/git/blobs/${pinSha}`) ? blob(`${target}\n`) : get(endpoint);
+  const current = await run(f);
+  assert.equal(current.status, "current");
+  assert.equal(current.baseSha, baseSha);
+  assert.equal(current.roots[0].compatibility, "unknown");
+  assert.deepEqual(current.changes, []);
+  assert.equal(f.state.writes.length, 0);
+});
+
 test("multi-root proposals are all-or-nothing and include nonstandard roots in the same bounded proposal", async () => {
   const f = fixture();
   f.state.baseTree.tree.push(file("terraform-sub/providers.tf"), file("terraform-sub/.terraform-version", pinSha));
   assert.equal((await run(f, { dryRun: false })).status, "blocked");
   assert.equal(f.state.writes.length, 0);
+  const digest = sourceDigest(rootSources(f.state.baseTree)[0].compatibilityFiles);
+  f.policy.compatibility[`${repository}/terraform`].sourceDigest = digest;
   f.policy.compatibility[`${repository}/terraform-sub`] = {
-    sourceDigest: sourceDigest([file("terraform-sub/providers.tf")]), allowedTargets: [target],
+    sourceDigest: digest, allowedTargets: [target],
     rationale: "Reviewed independent subscription-root required_version and overrides",
   };
   const result = await run(f);

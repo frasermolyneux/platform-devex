@@ -22,8 +22,9 @@ frasermolyneux repositories.
 repositories and every valid pinned Terraform root, including `terraform-sub` and
 `edge`. It proposes at most one bounded, App-authored CLI-pin PR per repository.
 Targets and exact-source compatibility require central human approval; release
-discovery cannot widen the approved minor policy. Manual runs default to
-dry run, and scheduled writes remain disabled until explicitly activated.
+discovery cannot widen the approved minor policy. The owner has admitted the
+native Sunday 00:37 UTC schedule, effective after default-branch merge; per-root
+compatibility still gates every proposal. Manual runs default to dry run.
 Dependabot retains provider/module ownership. This controller never runs target
 code, changes workflows or merge/publication controls, auto-merges or deploys.
 

@@ -12,7 +12,14 @@ The committed `scripts/terraform-cli-policy.json` records the owner-approved
 baseline **1.17.0** (21 October 2026) and `approvedMinor: "1.17"`, with no
 root compatibility reviews yet. The owner reviewed its Go 1.26.10 build and
 CVE-2026-111943 fix; that is not a blanket claim about every advisory/feature.
-This is deliberately **not activated for scheduled writes**. Official release
+The explicit estate rollout request and release review authorize this central
+baseline/minor policy. They do **not** prove source compatibility for every root
+or successful validation/state-backed plans. No root approval is inferred from
+the estate request, an existing 1.17.0 pin, or validation reported as still running.
+The owner has admitted the weekly scheduler using
+`TF_CLI_UPDATES_ENABLED=true`; it takes effect when this workflow is merged onto
+the default branch. Root compatibility remains an independent, fail-closed gate.
+Official release
 discovery is not itself a security/support approval. Review the official
 Terraform releases, HashiCorp security bulletins (including fixed-version
 mappings), support policy and relevant release notes before choosing one exact
@@ -34,10 +41,14 @@ The result reports the latest *observed* stable release separately from the
 approved target and does not claim it is the latest secure/supported version.
 
 Compatibility uses **manual source-bound review**, not a partial HCL parser.
-For each discovered root, the artifact reports a SHA-256 `sourceDigest` over
-the sorted `[repository-relative path, Git blob SHA]` pairs of **every direct-root
-`.tf` and `.tf.json` file**, including override files. Read those exact sources
-at the reported base commit, assess all `required_version` constraints and
+For each discovered root, the artifact reports its immutable default-branch
+`baseSha` and a SHA-256 `sourceDigest` over
+the sorted `[repository-relative path, Git blob SHA]` pairs of **every repository
+`.tf` and `.tf.json` file**, including local modules and overrides. This is
+deliberately conservative: any Terraform source change invalidates every root's
+approval, even when a particular root does not use that file. Do not reuse a
+direct-root-only digest from the earlier design. Read those exact sources at
+the reported base commit, assess all `required_version` constraints and
 overrides, and add an approval, for example:
 
 ```json
@@ -51,7 +62,7 @@ overrides, and add an approval, for example:
       "sourceDigest": "<64 lowercase hex characters from the dry-run result>",
       "reviewedMinor": "1.17",
       "allowedTargets": [],
-      "rationale": "Record the exact reviewed constraints, override handling and compatibility conclusion"
+      "rationale": "Reviewed <actual base commit>, root/module sources and overrides: <actual effective constraints and conclusion>. Source review only; no state-backed plan claimed."
     }
   }
 }
@@ -67,6 +78,67 @@ that complete minor range. Omit it and use exact `allowedTargets` for restrictiv
 constraints/exceptions; a newer patch outside an exact review blocks instead of
 trying older versions. The controller
 does not silently select an alternate target or downgrade newer pins.
+
+The actual configuration key is `compatibility`, not `compatibilityReviews`.
+Each key is `<owner>/<repository>/<root>`; use `.` for a repository-root pin,
+and distinct entries for `terraform`, `terraform-sub`, `edge` and nested roots.
+`sourceDigest` must be 64 lowercase hexadecimal characters; `allowedTargets`
+is required even when empty (at most ten exact stable versions), and `rationale`
+must contain at least 20 characters after trimming surrounding whitespace.
+At least one of `reviewedMinor` or nonempty `allowedTargets` is required. For an exact-only
+approval omit `reviewedMinor` and set `"allowedTargets": ["1.17.0"]`.
+
+### Evidence required to populate a root
+
+For each root, supply these independently verifiable inputs in a reviewed
+central policy PR:
+
+1. The repository/root, immutable `baseSha` and `sourceDigest` from a real run.
+   Recompute the digest from the complete tree at that commit, using the same
+   sorted path/blob-SHA pairs, if producing evidence independently of the run.
+   Future pin-only changes do not invalidate the digest; source changes do.
+2. A review of the root and its module dependencies in the complete repository
+   source snapshot, including overrides, identifying every effective
+   `required_version` constraint (or its verified absence). Terraform also
+   enforces child-module CLI constraints. Record the commit, exact constraints,
+   override handling and conclusion in `rationale`, with review evidence in the policy PR.
+   For example, a verified `>= 1.15.6` or `>= 1.14.3` with no additional
+   restrictions admits all stable 1.17 patches. Do not extrapolate that conclusion
+   to another root, a child module or an unexamined override. For external modules,
+   verify the exact immutable source/version and its CLI constraints; unresolved
+   or mutable dependency compatibility cannot justify a whole-minor approval.
+3. Choose the complete reviewed minor only if all constraints allow that entire
+   stable patch line; otherwise enumerate only exact verified targets. Unknown
+   syntax/semantics or incomplete source review remains unapproved.
+
+Static source compatibility is sufficient to authorize a **pin-update proposal**;
+it does not require claiming that a state-backed plan has already succeeded.
+Validation and actual root plans are separate, current-head acceptance evidence
+before human merge. Attach real commands, outcomes and CI/run links when those
+checks have completed; never substitute a planned/running check for success.
+
+The committed compatibility map remains empty: no complete immutable root/module
+source review was supplied or independently verified here. Thus all discovered
+roots remain unapproved for a future pin change. This does not block read-only
+discovery or an already-current pin, and does not discard the central 1.17 approval.
+The parent can populate entries from the rollout's reviewed source snapshots
+without inventing or waiting for state-plan results.
+
+### Baseline validation evidence
+
+The parent supplied `terraform-rollout-lock-results.json`, SHA-256
+`6747333f04fb2950dfb6e82716f0d6c96f7c418bf7576cf22e9e09889c333852`,
+on 25 October 2026. That snapshot records 31 roots across 29 repositories, all
+using CLI 1.17.0 with `valid: true` after backend-disabled initialization,
+and 31 provider-lock SHA-256 values. It is baseline validation evidence, not an
+execution by this controller, source-bound whole-minor approval or a state-backed
+plan. The snapshot contains no immutable source commit or compatibility digest.
+
+Keep its non-green details visible: formatting passes for 30 roots;
+`demo-manager/terraform` reports `tfvars\prd.tfvars` formatting differences.
+`platform-workloads/terraform` and `trip-side-kick/terraform` each report one
+warning. The parent owns follow-up validation evidence and state-backed plans;
+do not turn these records into a claim that all checks/plans passed.
 
 ## Discovery and permissions
 
@@ -94,7 +166,9 @@ Terraform source. This covers `terraform`, `terraform-sub`, `edge`, repository
 root and other explicitly pinned execution roots, not just the usual directory.
 Unpinned roots are not bootstrapped: the estate standards rollout owns their
 initial pins/locks. Symlinks, unsafe locations, invalid exact pins, more than 32
-roots or 512 source files per root fail closed. Metadata responses are bounded
+roots, 512 direct source files per root or 2,048 repository Terraform sources
+fail closed. Repository Terraform sources must be regular files, not symlinks.
+Metadata responses are bounded
 to 2 MiB, pin blobs to 64 bytes, API calls to 30 seconds and paginated collections
 to ten pages. Jobs have explicit timeouts.
 
@@ -134,19 +208,44 @@ unchanged. Merging pin changes can trigger existing target deployment workflows.
 
 ## Schedule, dry run and urgent operation
 
-The reviewed ops-clock file has no Sunday 00:37 UTC allocation. This workflow
-proposes `37 0 * * 0`, before the per-repository Sunday update window. **The parent
-rollout must record the central slot in `.github-copilot/docs/ops-clock.md` before
-activation**; this implementation changes only `platform-devex`.
+The parent rollout has registered **Sunday 00:37 UTC** in
+`.github-copilot/docs/ops-clock.md`, before the per-repository Sunday update
+window. This workflow uses `37 0 * * 0`; this implementation changes only
+`platform-devex`. Ensure the registered clock change has landed before activation.
 
-Scheduled runs remain read-only until the owner explicitly sets repository
-variable `TF_CLI_UPDATES_ENABLED=true` after target/compatibility approvals and
-permission/CI acceptance. Manual dispatch defaults to dry run:
+GitHub Actions `on.schedule` in `.github/workflows/terraform-cli-updates.yml` is
+the actual native scheduler, not an ops-clock-document trigger. The owner-approved
+repository variable `TF_CLI_UPDATES_ENABLED=true` has been registered, so Sunday
+runs are admitted to propose updates once this workflow is on the default branch.
+They still require current source-bound compatibility approval, ownership/race
+checks and human merge; an empty approval map cannot authorize a pin change.
+Setting that variable to `false` pauses scheduled writes while retaining read-only
+discovery; it does not remove the cron. Manual dispatch defaults to dry run:
 
 ```pwsh
 gh workflow run terraform-cli-updates.yml --repo frasermolyneux/platform-devex -f dry_run=true
 gh workflow run terraform-cli-updates.yml --repo frasermolyneux/platform-devex -f repository=platform-monitoring -f dry_run=true
 ```
+
+Run these only after the workflow has merged to the default branch; a feature
+branch dispatch is not a substitute for production admission. Start with the
+single-repository dry run, inspect its artifacts/activity-log summary, then run
+discovery across the installation. An estate rollout merged at the selected
+target should report `current`, no changed paths and `compatibility: "unknown"`
+for unreviewed roots. A root needing an edit without approval reports `blocked`;
+it must not propose a PR. Repositories without pins report `not-applicable`.
+No target branches, commits or PRs should be written; the controller's own
+activity-log comment is expected.
+
+Confirm successful installation discovery and each single-repository token mint,
+complete tree/pin/PR/check/status reads where applicable, and matching expected
+versus collected artifacts. A successful dry run proves the requested **read**
+scopes, not Contents/Pull requests **write**. Verify installation-granted write
+permissions through App governance or an already-successful repository-scoped
+writer-token mint using this same broker; do not broaden dry-run credentials or
+perform target writes merely to test access. Existing writer-token evidence does
+not replace running this new workflow. A human `gh` token rejected by the App-only
+installation-inspection API is not proof that the App lacks target permissions.
 
 For an urgent reviewed security target, first merge the reviewed central policy,
 then use `-f dry_run=false` and optionally select a repository. This bypasses only

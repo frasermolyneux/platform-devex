@@ -9,6 +9,7 @@ const MINOR = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SHA = /^[a-f0-9]{40}$/;
 const MAX_ROOTS = 32;
+const MAX_SOURCE_FILES = 2048;
 const MAX_ENTRIES = 20000;
 const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -78,6 +79,11 @@ export function rootSources(tree) {
   }
   const pins = tree.tree.filter((item) => item.path === ".terraform-version" || item.path.endsWith("/.terraform-version"));
   requireThat(pins.length <= MAX_ROOTS, "Too many Terraform roots");
+  const compatibilityFiles = tree.tree.filter((item) => item.path.endsWith(".tf") || item.path.endsWith(".tf.json"))
+    .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  requireThat(pins.length === 0 || compatibilityFiles.length <= MAX_SOURCE_FILES &&
+    compatibilityFiles.every((item) => item.type === "blob" && item.mode === "100644"),
+  "Incomplete or oversized repository Terraform compatibility sources");
   return pins.map((pin) => {
     requireThat(pin.type === "blob" && pin.mode === "100644" && /^[A-Za-z0-9_.\/-]+$/.test(pin.path) &&
       !pin.path.split("/").some((part) => [".git", ".github", ".terraform", "node_modules", "vendor"].includes(part)),
@@ -90,11 +96,11 @@ export function rootSources(tree) {
     requireThat(files.length > 0 && files.length <= 512 &&
       files.every((item) => item.type === "blob" && item.mode === "100644"),
     "Pin has no bounded regular Terraform root sources");
-    return { root, pin, files };
+    return { root, pin, files, compatibilityFiles };
   }).sort((a, b) => a.pin.path < b.pin.path ? -1 : a.pin.path > b.pin.path ? 1 : 0);
 }
 
-// Git blob identities bind every direct-root HCL/JSON file, including override files.
+// Bind all repository Terraform sources, including local modules and overrides.
 // No partial HCL parser or target interpreter is trusted to prove compatibility.
 export function sourceDigest(files) {
   return createHash("sha256").update(JSON.stringify(files.map(({ path, sha }) => [path, sha]))).digest("hex");
@@ -107,12 +113,12 @@ export async function planUpdate({ api, repository, baseSha, policy, releases })
   const roots = rootSources(tree);
   const changes = [], observations = [], blocked = [];
   const target = selectTarget(policy, releases);
-  for (const { root, pin, files } of roots) {
+  for (const { root, pin, compatibilityFiles } of roots) {
     const blob = await api.get(`/repos/${repository}/git/blobs/${pin.sha}`);
     requireThat(blob.encoding === "base64" && blob.size <= 64 && typeof blob.content === "string",
       "Invalid pin blob");
     const current = pinVersion(Buffer.from(blob.content, "base64").toString("utf8"));
-    const digest = sourceDigest(files);
+    const digest = sourceDigest(compatibilityFiles);
     const review = policy.compatibility[`${repository}/${root}`];
     const compatible = review?.sourceDigest === digest &&
       (review.allowedTargets.includes(target) || target?.startsWith(`${review.reviewedMinor}.`));
@@ -209,7 +215,7 @@ export async function reconcile({ api, repository, bot, policy, releases, dryRun
     typeof meta.default_branch === "string", "Repository is not applicable");
   const base = await api.get(refPath(repository, meta.default_branch));
   const plan = await planUpdate({ api, repository, baseSha: base.object.sha, policy, releases });
-  const result = { repository, dryRun, latestObserved: releases[0] ?? null, target: plan.target,
+  const result = { repository, baseSha: plan.baseSha, dryRun, latestObserved: releases[0] ?? null, target: plan.target,
     roots: plan.observations, blocked: plan.blocked, changes: plan.changes.map((item) => item.path), status: "not-applicable" };
   if (plan.observations.length === 0) return result;
   const pulls = ownedPulls(await openPulls(api, repository), repository, bot);
