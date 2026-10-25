@@ -251,7 +251,7 @@ export async function reconcile({ api, repository, bot, policy, releases, dryRun
         "Existing PR pin is newer than approved target; downgrade refused");
       if (expected.get(file.filename) !== content) identical = false;
     }
-    if (identical && !plan.blocked.length) return { ...result, status: "unchanged" };
+    if (identical && expected.size > 0 && !plan.blocked.length) return { ...result, status: "unchanged" };
   }
   if (plan.blocked.length) return { ...result, status: "blocked" };
   if (!plan.changes.length) return { ...result, status: pr ? "obsolete-pr-needs-human" : "current" };

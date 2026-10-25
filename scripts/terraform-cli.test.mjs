@@ -252,6 +252,20 @@ test("dry-run defaults to no writes; writes create exactly one atomic pin-only P
   assert.match(f.state.pulls[0].body, /Human review, real root validations\/plans/);
 });
 
+test("an empty owned PR after a separately merged pin update requires human reconciliation", async () => {
+  const f = fixture();
+  await run(f, { dryRun: false });
+  f.state.base = "f".repeat(40);
+  f.state.baseTree = structuredClone(f.state.headTree);
+  f.state.diff = [];
+  const count = f.state.writes.length;
+  const result = await run(f, { dryRun: false });
+  assert.equal(result.status, "obsolete-pr-needs-human");
+  assert.deepEqual(result.changes, []);
+  assert.equal(result.pullRequest, 7);
+  assert.equal(f.state.writes.length, count);
+});
+
 test("updates only the existing owned branch/PR for a newly reviewed target", async () => {
   const f = fixture();
   await run(f, { dryRun: false });
