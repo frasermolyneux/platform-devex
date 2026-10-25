@@ -193,6 +193,9 @@ Only planned pin additions (existing file replacements) enter the commit.
 Repeated runs with the same source/target/head produce no writes. New approved
 targets update the same owned PR. Obsolete PRs and incompatible changes require
 human reconciliation rather than automatic closing or replacing reviews.
+The publication response must still match the reviewed base branch/SHA,
+committed head branch/SHA and repository origin. A retarget or base movement
+observed during publication is incomplete activity, not a successful update.
 
 GitHub offers no transaction locking both default and update refs: a change
 after the last read can still occur. Post-commit rechecks catch observed races

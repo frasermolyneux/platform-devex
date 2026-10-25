@@ -19,7 +19,7 @@ function fixture() {
   const meta = { full_name: repository, archived: false, fork: false, default_branch: "main" };
   const makePr = () => ({ number: 7, state: "open", user: { type: "Bot", login: bot }, body: `${MARKER}\n`,
     head: { ref: BRANCH, sha: state.head, repo: { full_name: repository } },
-    base: { ref: "main", repo: { full_name: repository } } });
+    base: { ref: "main", sha: state.base, repo: { full_name: repository } } });
   const api = {
     async get(endpoint) {
       if (endpoint === `/repos/${repository}`) return meta;
@@ -59,11 +59,14 @@ function fixture() {
       assert.ok(endpoint.endsWith("/pulls"));
       const pr = { ...makePr(), title: data.title, body: data.body };
       state.pulls = [pr];
+      state.onPublished?.(pr);
       return pr;
     },
     async patch(endpoint, data) {
       state.writes.push({ endpoint, data });
-      return { ...makePr(), ...data };
+      const pr = { ...makePr(), ...data };
+      state.onPublished?.(pr);
+      return pr;
     },
     async graphql(query, { input }) {
       state.writes.push({ endpoint: "/graphql", data: input });
@@ -276,6 +279,26 @@ test("updates only the existing owned branch/PR for a newly reviewed target", as
   assert.equal(f.state.writes.filter((write) => write.endpoint.endsWith("/git/refs")).length, 1);
   assert.equal(f.state.writes.filter((write) => write.endpoint.endsWith("/pulls")).length, 1);
   assert.equal(f.state.writes.at(-1).endpoint, `/repos/${repository}/pulls/7`);
+});
+
+test("PR publication races cannot report an update on an unreviewed base or repository origin", async () => {
+  for (const mutate of [
+    (pr) => { pr.base.ref = "release/unreviewed"; },
+    (pr) => { pr.base.sha = "f".repeat(40); },
+    (pr) => { pr.base.repo.full_name = "owner/other"; },
+    (pr) => { pr.head.repo.full_name = "owner/other"; },
+    (pr) => { pr.head.ref = "other-branch"; },
+  ]) {
+    const f = fixture();
+    await run(f, { dryRun: false });
+    f.policy.approvedTarget = "1.17.0";
+    f.policy.approvedMinor = "1.17";
+    f.policy.compatibility[`${repository}/terraform`].allowedTargets = ["1.17.0"];
+    f.state.onPublished = mutate;
+    await assert.rejects(run(f, { dryRun: false }), /Published PR raced/);
+    assert.equal(f.state.writes.filter((write) => write.endpoint.endsWith("/pulls")).length, 1);
+    assert.equal(f.state.writes.at(-1).endpoint, `/repos/${repository}/pulls/7`);
+  }
 });
 
 test("approved minor selects compatible stable patches only; future minors and restrictive constraints stay held", async () => {

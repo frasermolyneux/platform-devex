@@ -296,8 +296,10 @@ export async function reconcile({ api, repository, bot, policy, releases, dryRun
   const payload = { title: `chore: update Terraform CLI to ${plan.target}`, body };
   const published = pr ? await api.patch(`/repos/${repository}/pulls/${pr.number}`, payload) :
     await api.post(`/repos/${repository}/pulls`, { ...payload, head: BRANCH, base: meta.default_branch });
-  requireThat(published.state === "open" && published.head?.sha === newSha,
-    "Published PR raced or is not open at the committed head");
+  requireThat(published.state === "open" && published.head?.sha === newSha && published.head.ref === BRANCH &&
+    published.head.repo?.full_name === repository && published.base?.repo?.full_name === repository &&
+    published.base.ref === meta.default_branch && published.base.sha === plan.baseSha,
+  "Published PR raced or no longer matches the reviewed base/head and repository origin");
   return { ...result, status: pr ? "updated" : "created", pullRequest: published.number, headSha: newSha,
     checks: await checkSnapshot(api, repository, newSha) };
 }
