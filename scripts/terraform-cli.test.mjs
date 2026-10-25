@@ -64,7 +64,9 @@ function fixture() {
     },
     async patch(endpoint, data) {
       state.writes.push({ endpoint, data });
+      state.onPatch?.();
       const pr = { ...makePr(), ...data };
+      state.pulls = [pr];
       state.onPublished?.(pr);
       return pr;
     },
@@ -267,6 +269,31 @@ test("an empty owned PR after a separately merged pin update requires human reco
   assert.deepEqual(result.changes, []);
   assert.equal(result.pullRequest, 7);
   assert.equal(f.state.writes.length, count);
+});
+
+test("retry repairs stale PR metadata after a successful pin commit without another commit", async () => {
+  const f = fixture();
+  await run(f, { dryRun: false });
+  f.policy.approvedTarget = "1.17.0";
+  f.policy.approvedMinor = "1.17";
+  f.policy.compatibility[`${repository}/terraform`].allowedTargets = ["1.17.0"];
+  f.state.onPatch = () => { throw new Error("metadata PATCH failed"); };
+  await assert.rejects(run(f, { dryRun: false }), /metadata PATCH failed/);
+  assert.equal(f.state.headPin, "1.17.0\n");
+  assert.equal(f.state.pulls[0].title, `chore: update Terraform CLI to ${target}`);
+  const writes = f.state.writes.length;
+  assert.equal((await run(f)).status, "would-refresh-metadata");
+  assert.equal(f.state.writes.length, writes);
+  f.state.onPatch = undefined;
+  assert.equal((await run(f, { dryRun: false })).status, "metadata-updated");
+  assert.equal(f.state.writes.filter(write => write.endpoint === "/graphql").length, 2);
+  assert.deepEqual(f.state.writes.slice(writes).map(write => write.endpoint), [`/repos/${repository}/pulls/7`]);
+  assert.equal(f.state.pulls[0].title, "chore: update Terraform CLI to 1.17.0");
+  assert.match(f.state.pulls[0].body, /releases\/tag\/v1\.17\.0/);
+  assert.match(f.state.pulls[0].body, new RegExp(baseSha));
+  const repaired = f.state.writes.length;
+  assert.equal((await run(f, { dryRun: false })).status, "unchanged");
+  assert.equal(f.state.writes.length, repaired);
 });
 
 test("updates only the existing owned branch/PR for a newly reviewed target", async () => {

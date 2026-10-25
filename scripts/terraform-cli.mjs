@@ -221,10 +221,19 @@ export async function reconcile({ api, repository, bot, policy, releases, dryRun
   const result = { repository, baseSha: plan.baseSha, dryRun, latestObserved: releases[0] ?? null, target: plan.target,
     roots: plan.observations, blocked: plan.blocked, changes: plan.changes.map((item) => item.path), status: "not-applicable" };
   if (plan.observations.length === 0) return result;
+  const body = `${MARKER}\n## Reviewed Terraform CLI update\n\n` +
+    `Central approved target: **${plan.target}**. Official release: https://github.com/hashicorp/terraform/releases/tag/v${plan.target}\n\n` +
+    `Reviewed source base: \`${plan.baseSha}\`.\n\n` +
+    plan.observations.map((root) => `- \`${root.root}\`: ${root.current} → ${plan.target}; compatibility digest \`${root.sourceDigest}\``).join("\n") +
+    "\n\nOnly exact CLI pins change. Dependabot owns provider/module updates. No target code, Terraform, providers or cloud credentials were used.\n" +
+    "Compatibility is a central human-reviewed source-digest approval, not an inferred HCL evaluation or security guarantee.\n" +
+    "Human review, real root validations/plans and existing environment/publication gates are required. This controller never merges or deploys.\n";
+  const payload = { title: `chore: update Terraform CLI to ${plan.target}`, body };
   const pulls = ownedPulls(await openPulls(api, repository), repository, bot);
   const pr = pulls[0];
   const head = await optionalRef(api, repository, BRANCH);
   requireThat(Boolean(pr) === Boolean(head), "Orphan controller branch or missing PR branch requires human reconciliation");
+  let identical = false;
   if (pr) {
     requireThat(pr.base.ref === meta.default_branch && pr.head.sha === head.object.sha, "PR/head identity changed");
     const headTree = await api.get(`/repos/${repository}/git/trees/${head.object.sha}?recursive=1`);
@@ -240,7 +249,7 @@ export async function reconcile({ api, repository, bot, policy, releases, dryRun
     const expected = new Map(plan.changes.map((change) => [change.path, change.content]));
     requireThat(plan.blocked.length > 0 || diff.files.every((file) => expected.has(file.filename)),
       "Existing PR includes obsolete pin changes; human reconciliation required");
-    let identical = diff.files.length === expected.size;
+    identical = diff.files.length === expected.size;
     for (const file of diff.files) {
       const entry = headTree.tree.find((item) => item.path === file.filename);
       const blob = await api.get(`/repos/${repository}/git/blobs/${entry.sha}`);
@@ -251,11 +260,12 @@ export async function reconcile({ api, repository, bot, policy, releases, dryRun
         "Existing PR pin is newer than approved target; downgrade refused");
       if (expected.get(file.filename) !== content) identical = false;
     }
-    if (identical && expected.size > 0 && !plan.blocked.length) return { ...result, status: "unchanged" };
+    if (identical && expected.size > 0 && !plan.blocked.length &&
+      pr.title === payload.title && pr.body === payload.body) return { ...result, status: "unchanged" };
   }
   if (plan.blocked.length) return { ...result, status: "blocked" };
   if (!plan.changes.length) return { ...result, status: pr ? "obsolete-pr-needs-human" : "current" };
-  if (dryRun) return { ...result, status: "would-propose" };
+  if (dryRun) return { ...result, status: identical ? "would-refresh-metadata" : "would-propose" };
 
   const recheck = async (expectedHead) => {
     const currentMeta = await api.get(`/repos/${repository}`);
@@ -270,37 +280,32 @@ export async function reconcile({ api, repository, bot, policy, releases, dryRun
     const currentHead = await optionalRef(api, repository, BRANCH);
     requireThat((currentHead?.object.sha ?? null) === expectedHead, "Controller branch raced; retry");
   };
-  await recheck(head?.object.sha ?? null);
-  if (!head) {
-    await api.post(`/repos/${repository}/git/refs`, { ref: `refs/heads/${BRANCH}`, sha: plan.baseSha });
+  let newSha = head?.object.sha;
+  if (!identical) {
+    await recheck(head?.object.sha ?? null);
+    if (!head) {
+      await api.post(`/repos/${repository}/git/refs`, { ref: `refs/heads/${BRANCH}`, sha: plan.baseSha });
+    }
+    // GraphQL provides an atomic expected-head compare-and-swap; never force-push.
+    await recheck(head?.object.sha ?? plan.baseSha);
+    const committed = await api.graphql(`mutation($input: CreateCommitOnBranchInput!) {
+      createCommitOnBranch(input: $input) { commit { oid } }
+    }`, { input: { branch: { repositoryNameWithOwner: repository, branchName: BRANCH },
+      expectedHeadOid: head?.object.sha ?? plan.baseSha,
+      message: { headline: `chore: update Terraform CLI to ${plan.target}` },
+      fileChanges: { additions: plan.changes.map(({ path, content }) =>
+        ({ path, contents: Buffer.from(content).toString("base64") })) } } });
+    newSha = committed.createCommitOnBranch?.commit?.oid;
+    requireThat(SHA.test(newSha), "Commit creation returned no identity");
   }
-  // GraphQL provides an atomic expected-head compare-and-swap; never force-push.
-  await recheck(head?.object.sha ?? plan.baseSha);
-  const committed = await api.graphql(`mutation($input: CreateCommitOnBranchInput!) {
-    createCommitOnBranch(input: $input) { commit { oid } }
-  }`, { input: { branch: { repositoryNameWithOwner: repository, branchName: BRANCH },
-    expectedHeadOid: head?.object.sha ?? plan.baseSha,
-    message: { headline: `chore: update Terraform CLI to ${plan.target}` },
-    fileChanges: { additions: plan.changes.map(({ path, content }) =>
-      ({ path, contents: Buffer.from(content).toString("base64") })) } } });
-  const newSha = committed.createCommitOnBranch?.commit?.oid;
-  requireThat(SHA.test(newSha), "Commit creation returned no identity");
   await recheck(newSha);
-  const body = `${MARKER}\n## Reviewed Terraform CLI update\n\n` +
-    `Central approved target: **${plan.target}**. Official release: https://github.com/hashicorp/terraform/releases/tag/v${plan.target}\n\n` +
-    `Reviewed source base: \`${plan.baseSha}\`.\n\n` +
-    plan.observations.map((root) => `- \`${root.root}\`: ${root.current} → ${plan.target}; compatibility digest \`${root.sourceDigest}\``).join("\n") +
-    "\n\nOnly exact CLI pins change. Dependabot owns provider/module updates. No target code, Terraform, providers or cloud credentials were used.\n" +
-    "Compatibility is a central human-reviewed source-digest approval, not an inferred HCL evaluation or security guarantee.\n" +
-    "Human review, real root validations/plans and existing environment/publication gates are required. This controller never merges or deploys.\n";
-  const payload = { title: `chore: update Terraform CLI to ${plan.target}`, body };
   const published = pr ? await api.patch(`/repos/${repository}/pulls/${pr.number}`, payload) :
     await api.post(`/repos/${repository}/pulls`, { ...payload, head: BRANCH, base: meta.default_branch });
   requireThat(published.state === "open" && published.head?.sha === newSha && published.head.ref === BRANCH &&
     published.head.repo?.full_name === repository && published.base?.repo?.full_name === repository &&
     published.base.ref === meta.default_branch && published.base.sha === plan.baseSha,
   "Published PR raced or no longer matches the reviewed base/head and repository origin");
-  return { ...result, status: pr ? "updated" : "created", pullRequest: published.number, headSha: newSha,
+  return { ...result, status: pr ? identical ? "metadata-updated" : "updated" : "created", pullRequest: published.number, headSha: newSha,
     checks: await checkSnapshot(api, repository, newSha) };
 }
 

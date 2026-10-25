@@ -218,6 +218,10 @@ human reconciliation rather than automatic closing or replacing reviews.
 The publication response must still match the reviewed base branch/SHA,
 committed head branch/SHA and repository origin. A retarget or base movement
 observed during publication is incomplete activity, not a successful update.
+If a pin commit succeeded but PR metadata publication failed, the next run
+compares the intended title/body too. Dry runs report `would-refresh-metadata`;
+writers recheck base/head ownership and publish metadata only (`metadata-updated`),
+without another commit. An empty obsolete PR still requires human reconciliation.
 
 GitHub offers no transaction locking both default and update refs: a change
 after the last read can still occur. Post-commit rechecks catch observed races
