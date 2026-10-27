@@ -69,6 +69,7 @@ function fixture({ variable = JSON.stringify(contract()), current = null, head =
     baseReads: 0,
     pullsReads: 0,
     headContent: head ? expected : null,
+    unrelated: [],
   };
   const makePull = (data = {}) => ({
     number: 7,
@@ -102,7 +103,10 @@ function fixture({ variable = JSON.stringify(contract()), current = null, head =
         return { object: { sha: state.head } };
       }
       if (endpoint === `/repos/${repository}/git/trees/${state.base}?recursive=1`) {
-        return tree(state.current === null ? [] : [file(".checkov.yml", sourceBlobSha)]);
+        return tree([
+          ...(state.current === null ? [] : [file(".checkov.yml", sourceBlobSha)]),
+          ...state.unrelated,
+        ]);
       }
       if (endpoint === `/repos/${repository}/git/trees/${state.head}?recursive=1`) {
         return tree([file(".checkov.yml", generatedBlobSha)]);
@@ -229,6 +233,11 @@ test("contract validation rejects unknown versions, profiles, unsafe paths and m
   assert.doesNotThrow(() => validateContract(contract({ exceptions: [{
     rule: "CKV_SECRET_6", reason: longest,
   }] }), policy));
+  for (const separator of ["\u0085", "\u2028", "\u2029"]) {
+    assert.throws(() => validateContract(contract({ exceptions: [{
+      rule: "CKV_SECRET_6", reason: `Meaningful before${separator}meaningful after`,
+    }] }), policy), /malformed/);
+  }
 });
 
 test("explicitly skips repositories without a variable or managed files", async () => {
@@ -246,6 +255,23 @@ test("reports current content as a no-op", async () => {
   assert.equal(result.status, "current");
   assert.deepEqual(result.changes, []);
   assert.equal(f.state.writes.length, 0);
+});
+
+test("accepts unrelated valid Git paths containing spaces, brackets and Unicode", async () => {
+  const f = fixture();
+  f.state.current = f.expected;
+  f.state.unrelated = [
+    file("docs/file with spaces.md", "1".repeat(40)),
+    file("src/[generated]/contract.json", "2".repeat(40)),
+    file("資料/überblick.txt", "3".repeat(40)),
+  ];
+  assert.equal((await reconcile({ api: f.api, repository, bot, policy })).status, "current");
+
+  f.state.unrelated.push(file("", "4".repeat(40)));
+  await assert.rejects(reconcile({ api: f.api, repository, bot, policy }), /tree entry/);
+  f.state.unrelated.pop();
+  f.state.unrelated.push(file("invalid\0path", "4".repeat(40)));
+  await assert.rejects(reconcile({ api: f.api, repository, bot, policy }), /tree entry/);
 });
 
 test("dry run reports drift without creating a branch or pull request", async () => {
@@ -371,12 +397,15 @@ test("workflow is least-privilege, bounded, dry by default and never checks out 
   assert.match(workflow, /dry_run:[\s\S]*default: true/);
   assert.match(workflow, /fail-fast: false/);
   assert.match(workflow, /max-parallel: 4/);
-  assert.match(workflow, /permission-actions: read/);
-  assert.match(workflow, /permission-contents: \$\{\{/);
-  assert.match(workflow, /permission-pull-requests: \$\{\{/);
-  assert.match(workflow, /vars\.REPOSITORY_STANDARDS_ENABLED == 'true'/);
-  assert.equal(workflow.match(/vars\.REPOSITORY_STANDARDS_ENABLED == 'true'/g)?.length, 3);
-  assert.match(workflow, /DRY_RUN: \$\{\{[\s\S]*REPOSITORY_STANDARDS_ENABLED == 'true'[\s\S]*'false' \|\| 'true'/);
+  assert.equal(workflow.match(/actions\/create-github-app-token@/g)?.length, 1);
+  assert.doesNotMatch(workflow, /permission-variables:/);
+  assert.match(workflow, /run: node scripts\/repository-standards-token\.mjs/);
+  assert.match(workflow, /GH_APP_INSTALLATION_ID: \$\{\{ vars\.GH_APP_INSTALLATION_ID \}\}/);
+  assert.match(workflow, /REPOSITORY_STANDARDS_ENABLED: \$\{\{ vars\.REPOSITORY_STANDARDS_ENABLED \}\}/);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ steps\.repository-token\.outputs\.token \}\}/);
+  assert.match(workflow, /APP_BOT: \$\{\{ steps\.repository-token\.outputs\['app-bot'\] \}\}/);
+  assert.match(workflow, /DRY_RUN: \$\{\{ steps\.repository-token\.outputs\['dry-run'\] \}\}/);
+  assert.doesNotMatch(workflow, /REPOSITORY_STANDARDS_ENABLED\s*==/);
   assert.match(workflow, /repository: \$\{\{ github\.repository \}\}/);
   assert.doesNotMatch(workflow, /repository: \$\{\{ matrix\.repo \}\}/);
   assert.doesNotMatch(workflow, /merge-multiple:\s*true/);

@@ -95,25 +95,26 @@ jobs:
           node-version: "22"
           package-manager-cache: false
 
-      - name: Create least-privilege repository token
-        id: app-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PEM }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ matrix.repo }}
-          permission-actions: read
-          permission-contents: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run || github.event_name == 'schedule' && vars.REPOSITORY_STANDARDS_ENABLED == 'true') && 'write' || 'read' }}
-          permission-pull-requests: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run || github.event_name == 'schedule' && vars.REPOSITORY_STANDARDS_ENABLED == 'true') && 'write' || 'read' }}
+      - name: Create exact repository-scoped GitHub App token
+        id: repository-token
+        run: node scripts/repository-standards-token.mjs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REPOSITORY_STANDARDS_ENABLED: ${{ vars.REPOSITORY_STANDARDS_ENABLED }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ matrix.repo }}
+          GH_APP_ID: ${{ vars.GH_APP_ID }}
+          GH_APP_INSTALLATION_ID: ${{ vars.GH_APP_INSTALLATION_ID }}
+          GH_APP_PEM: ${{ secrets.GH_APP_PEM }}
 
       - name: Reconcile managed files through an owned pull request
         run: node scripts/repository-standards.mjs reconcile
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.repository-token.outputs.token }}
           REPOSITORY: ${{ github.repository_owner }}/${{ matrix.repo }}
-          APP_BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
-          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run || github.event_name == 'schedule' && vars.REPOSITORY_STANDARDS_ENABLED == 'true') && 'false' || 'true' }}
+          APP_BOT: ${{ steps.repository-token.outputs['app-bot'] }}
+          DRY_RUN: ${{ steps.repository-token.outputs['dry-run'] }}
 
       - name: Upload metadata-only result
         if: always()

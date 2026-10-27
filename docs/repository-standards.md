@@ -5,6 +5,15 @@ reads each target repository's `REPOSITORY_STANDARDS` Actions variable. It uses 
 metadata and blobs only; target repositories are never checked out and target code is never
 executed.
 
+The GitHub App installation must grant **Variables: read**, Contents: read/write and Pull
+requests: read/write. `platform-devex` must provide `GH_APP_ID`, `GH_APP_INSTALLATION_ID` and
+`GH_APP_PEM`. The discovery job uses the pinned token action only to list installed repositories.
+Each reconcile job instead creates a short-lived RS256 App JWT in trusted Node code, validates
+the App through `/app`, and requests a fresh installation token scoped to exactly one matrix
+repository with Variables: read plus read-only or write Contents/Pull requests permissions.
+JWTs, private keys and tokens are never logged; the installation token is masked before being
+written to the step output.
+
 ## Contract
 
 The variable is strict JSON with this shape:
@@ -49,9 +58,11 @@ current head. It refuses human branches or pull requests, never writes a target 
 and never merges or enables auto-merge.
 
 Scheduled runs are report-only unless the `platform-devex` repository variable
-`REPOSITORY_STANDARDS_ENABLED` is exactly `true`. Only then does a schedule request target
-Contents and Pull requests write permissions and set `DRY_RUN=false`. Manual runs default to
-report-only and may explicitly request writes:
+`REPOSITORY_STANDARDS_ENABLED` is byte-for-byte `true`. Trusted Node code computes this mode;
+`TRUE`, `True`, surrounding whitespace and other values remain dry runs. Only exact enablement
+causes a schedule to request Contents and Pull requests write permissions and emit
+`dry-run=false`. Manual runs default to report-only and request writes only when the dispatch
+`dry_run` input is exactly false:
 
 ```pwsh
 gh workflow run repository-standards.yml -f repository=platform-status-web -f dry_run=true

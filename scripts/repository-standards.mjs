@@ -25,6 +25,7 @@ function exactKeys(value, keys, message) {
 export function validatePolicy(policy) {
   exactKeys(policy, ["version", "targetPath", "exceptionRules", "profiles"], "Invalid Checkov policy");
   requireThat(policy.version === "checkov-v1" && policy.targetPath === ".checkov.yml" &&
+    SAFE_PATH.test(policy.targetPath) && policy.targetPath.length <= 200 &&
     Array.isArray(policy.exceptionRules) && policy.exceptionRules.length > 0 &&
     policy.exceptionRules.length <= 32 &&
     Array.isArray(policy.profiles) && policy.profiles.length > 0 && policy.profiles.length <= 16,
@@ -77,7 +78,8 @@ export function validateContract(contract, policy) {
         !selectedRules.has(exception.rule) && !exceptions.has(exception.rule) &&
         typeof exception.reason === "string" && exception.reason === exception.reason.trim() &&
         exception.reason.length >= 10 && exception.reason.length <= 600 &&
-        !/[\r\n\u0000-\u001f]/.test(exception.reason), "Duplicate, unsupported, or malformed Checkov exception");
+        !/[\r\n\u0000-\u001f\u0085\u2028\u2029]/.test(exception.reason),
+      "Duplicate, unsupported, or malformed Checkov exception");
       exceptions.set(exception.rule, exception.reason);
     }
     managedFiles.push({ type: "checkov", path: policy.targetPath, policyVersion: file.version,
@@ -178,8 +180,9 @@ function validateTree(tree) {
     "Incomplete or oversized repository tree");
   const paths = new Set();
   for (const item of tree.tree) {
-    requireThat(typeof item.path === "string" && SAFE_PATH.test(item.path) && !paths.has(item.path) &&
-      SHA.test(item.sha), "Invalid repository tree entry");
+    requireThat(typeof item.path === "string" && item.path.length > 0 && item.path.length <= 500 &&
+      !item.path.includes("\0") && !paths.has(item.path) && SHA.test(item.sha),
+    "Invalid repository tree entry");
     paths.add(item.path);
   }
   return tree;

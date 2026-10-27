@@ -49,8 +49,11 @@ installation repositories for this workflow.
 the target `REPOSITORY_STANDARDS` Actions variable. Its first generator is the versioned Checkov
 policy under `standards/checkov/`. It uses only API metadata/blobs and App-owned pull requests:
 never check out or execute target code, write default branches, touch human branches/PRs, or merge.
-Scheduled writes require the explicit `REPOSITORY_STANDARDS_ENABLED == 'true'` repository gate;
-otherwise schedules and manual runs default to report-only. See `docs/repository-standards.md`.
+Scheduled writes require `REPOSITORY_STANDARDS_ENABLED` to be byte-for-byte `true`;
+trusted Node code evaluates the gate, and schedules/manual runs otherwise default to report-only.
+See `docs/repository-standards.md`.
+The reconcile matrix mints its own exact-permission installation token from
+`GH_APP_ID`, `GH_APP_INSTALLATION_ID` and `GH_APP_PEM`; the App must grant Variables: read.
 
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.
