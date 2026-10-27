@@ -45,6 +45,13 @@ leaves final PR review and merge to a human. It uses `scripts/continuous-improve
 its Node tests. An empty `vars.CI_REPOSITORIES` disables the matrix; never default to all App
 installation repositories for this workflow.
 
+`.github/workflows/repository-standards.yml` reconciles generic repository-managed files from
+the target `REPOSITORY_STANDARDS` Actions variable. Its first generator is the versioned Checkov
+policy under `standards/checkov/`. It uses only API metadata/blobs and App-owned pull requests:
+never check out or execute target code, write default branches, touch human branches/PRs, or merge.
+Scheduled writes require the explicit `REPOSITORY_STANDARDS_ENABLED == 'true'` repository gate;
+otherwise schedules and manual runs default to report-only. See `docs/repository-standards.md`.
+
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.
 
@@ -57,8 +64,11 @@ The repository itself is provisioned through `platform-workloads` (catalog entry
 - `.github/workflows/approve-copilot-runs.yml` — discovers installation repositories and runs
   `.github/actions/approve-copilot-workflow-runs/action.yml` per repository.
 - `.github/workflows/continuous-improvement.yml` — opt-in daily intake and hourly reconciliation.
+- `.github/workflows/repository-standards.yml` — managed repository-file pull-request reconciliation.
 - `scripts/continuous-improvement.mjs` — Copilot SDK triage, linked issue/PR reconciliation,
   bounded review fixes and human escalation.
+- `scripts/repository-standards.mjs` — generic managed-files contract, rendering and safe PR controller.
+- `standards/checkov/v1.json` — canonical approved Checkov profiles and rules.
 - `README.md` — repository overview and manual run instructions.
 
 ## Useful commands
@@ -68,6 +78,7 @@ gh workflow run stale-branches.yml
 gh workflow run delegate-failed-checks.yml
 gh workflow run approve-copilot-runs.yml
 gh workflow run continuous-improvement.yml -f mode=intake -f dry_run=true
+gh workflow run repository-standards.yml -f repository=platform-status-web -f dry_run=true
 gh run list --workflow stale-branches.yml --limit 5
 npm test
 ```
@@ -214,5 +225,6 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
 ## Authoritative repository docs
 
 - `README.md`
+- `docs/repository-standards.md` - managed-files contract, Checkov rendering and write gates.
 - `docs/plans/estate-analysis-alignment.md` - planned estate-wide analysis migration; not the
   current runtime contract until implemented.

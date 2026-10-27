@@ -1,0 +1,195 @@
+name: Reconcile Managed Repository Standards
+
+on:
+  schedule:
+    - cron: "27 * * * *"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Optional installed repository name (empty discovers all)
+        type: string
+        default: ""
+      dry_run:
+        description: Report drift without creating or updating pull requests
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      repos: ${{ steps.list.outputs.repos }}
+    steps:
+      - name: Require reviewed default branch
+        env:
+          RUN_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          node --input-type=module -e '
+            if (!process.env.DEFAULT_BRANCH || process.env.RUN_REF !== `refs/heads/${process.env.DEFAULT_BRANCH}`) {
+              throw new Error("Managed repository standards require the reviewed default branch");
+            }
+          '
+
+      - name: Check out trusted controller
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Create read-only installation discovery token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          permission-metadata: read
+
+      - name: Discover active installation repositories
+        id: list
+        run: node scripts/repository-standards.mjs discover
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          SELECTED_REPOSITORY: ${{ inputs.repository }}
+
+  reconcile:
+    needs: discover
+    if: needs.discover.outputs.repos != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    concurrency:
+      group: repository-standards-${{ matrix.repo }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        repo: ${{ fromJson(needs.discover.outputs.repos) }}
+    steps:
+      - name: Check out trusted controller
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Create least-privilege repository token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repo }}
+          permission-actions: read
+          permission-contents: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run || github.event_name == 'schedule' && vars.REPOSITORY_STANDARDS_ENABLED == 'true') && 'write' || 'read' }}
+          permission-pull-requests: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run || github.event_name == 'schedule' && vars.REPOSITORY_STANDARDS_ENABLED == 'true') && 'write' || 'read' }}
+
+      - name: Reconcile managed files through an owned pull request
+        run: node scripts/repository-standards.mjs reconcile
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPOSITORY: ${{ github.repository_owner }}/${{ matrix.repo }}
+          APP_BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run || github.event_name == 'schedule' && vars.REPOSITORY_STANDARDS_ENABLED == 'true') && 'false' || 'true' }}
+
+      - name: Upload metadata-only result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repository-standards-${{ matrix.repo }}
+          path: repository-standards-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+  summarize:
+    needs: [discover, reconcile]
+    if: always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Download per-repository results
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: repository-standards-*
+          path: results
+
+      - name: Report activity and incomplete collection
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REPOS: ${{ needs.discover.outputs.repos }}
+          DISCOVER: ${{ needs.discover.result }}
+          RECONCILE: ${{ needs.reconcile.result }}
+          DOWNLOAD: ${{ steps.download.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          expected=$(jq -r 'length' <<< "${REPOS:-[]}")
+          count=$(find results -type f -name repository-standards-result.json 2>/dev/null | wc -l || true)
+          incomplete=false
+          if [[ "$DISCOVER" != success || "$count" -ne "$expected" || ( "$expected" -gt 0 && ( "$RECONCILE" != success || "$DOWNLOAD" != success ) ) ]]; then
+            incomplete=true
+          fi
+
+          activity=false
+          if [[ -d results ]] && find results -type f -name repository-standards-result.json -exec \
+            jq -e 'select(.status != "current" and .status != "skipped-no-variable" and .status != "skipped-no-managed-files")' {} \; \
+            | grep -q .; then
+            activity=true
+          fi
+          if [[ "$activity" == false && "$incomplete" == false ]]; then
+            echo "All opted-in managed repository files are current; unconfigured repositories were skipped explicitly."
+            exit 0
+          fi
+
+          {
+            echo "## Managed repository standards"
+            echo ""
+            echo "[Run]($RUN_URL) — incomplete: $incomplete; collected: $count/$expected."
+            echo ""
+            echo "| Repository | Outcome | Pull request | Managed files |"
+            echo "| --- | --- | --- | --- |"
+            if [[ -d results ]]; then
+              find results -type f -name repository-standards-result.json -print0 | sort -z | while IFS= read -r -d '' file; do
+                jq -r '[.repository, .status, (.pullRequest // "—" | tostring), ((.managedFiles // []) | join(", "))] | "| " + join(" | ") + " |"' "$file"
+              done
+            fi
+            echo ""
+            echo "Managed changes are proposed only through App-owned pull requests for human review."
+          } | tee -a "$GITHUB_STEP_SUMMARY" > repository-standards-summary.md
+
+          issue=$(gh issue list --repo "$REPOSITORY" --search "Self-heal activity log in:title" --state open --json number --jq '.[0].number // empty')
+          if [[ -z "$issue" ]]; then
+            issue=$(gh api "repos/$REPOSITORY/issues" -f title="Self-heal activity log" -f body="Scheduled maintenance activity and incomplete runs." --jq '.number')
+          fi
+          gh issue comment "$issue" --repo "$REPOSITORY" --body-file repository-standards-summary.md
+          [[ "$incomplete" == false ]]
