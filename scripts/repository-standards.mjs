@@ -153,6 +153,10 @@ function refPath(repository, branch) {
   return `/repos/${repository}/git/ref/heads/${encodeURIComponent(branch)}`;
 }
 
+function updateRefPath(repository, branch) {
+  return `/repos/${repository}/git/refs/heads/${encodeURIComponent(branch)}`;
+}
+
 async function optionalGet(api, endpoint) {
   try { return await api.get(endpoint); }
   catch (error) { if (error.status === 404) return null; throw error; }
@@ -186,6 +190,28 @@ function validateTree(tree) {
     paths.add(item.path);
   }
   return tree;
+}
+
+function compareAncestry(compare, baseSha) {
+  requireThat(compare && ["ahead", "behind", "diverged", "identical"].includes(compare.status) &&
+    Number.isSafeInteger(compare.ahead_by) && compare.ahead_by >= 0 && compare.ahead_by <= 1_000_000 &&
+    Number.isSafeInteger(compare.behind_by) && compare.behind_by >= 0 && compare.behind_by <= 1_000_000 &&
+    compare.base_commit?.sha === baseSha && SHA.test(compare.merge_base_commit?.sha),
+  "Invalid managed-files comparison ancestry");
+  const current = compare.merge_base_commit.sha === baseSha && compare.behind_by === 0 &&
+    (compare.status === "identical" && compare.ahead_by === 0 ||
+      compare.status === "ahead" && compare.ahead_by > 0);
+  const stale = compare.merge_base_commit.sha !== baseSha && compare.behind_by > 0 &&
+    (compare.status === "behind" && compare.ahead_by === 0 ||
+      compare.status === "diverged" && compare.ahead_by > 0);
+  requireThat(current || stale, "Inconsistent managed-files comparison ancestry");
+  return {
+    current,
+    status: compare.status,
+    aheadBy: compare.ahead_by,
+    behindBy: compare.behind_by,
+    mergeBaseSha: compare.merge_base_commit.sha,
+  };
 }
 
 async function readBlob(api, repository, entry) {
@@ -248,19 +274,22 @@ export async function reconcile({ api, repository, bot, policy, dryRun = true })
   const head = await optionalGet(api, refPath(repository, BRANCH));
   requireThat(Boolean(pr) === Boolean(head),
     "Orphan managed-files branch or missing pull request branch requires human reconciliation");
-  let identical = false;
+  let identical = false, needsReset = false;
   if (pr) {
     requireThat(pr.base.ref === meta.default_branch && pr.head.sha === head.object.sha,
       "Managed-files pull request identity changed");
     const allowed = new Set(files.map((file) => file.path));
     const diff = await api.get(`/repos/${repository}/compare/${baseSha}...${head.object.sha}`);
+    const ancestry = compareAncestry(diff, baseSha);
+    needsReset = !ancestry.current;
+    result.ancestry = ancestry;
     requireThat(Array.isArray(diff.files) && diff.files.length <= files.length &&
       diff.files.every((file) => allowed.has(file.filename) &&
         ["added", "modified"].includes(file.status) && !file.previous_filename),
     "Existing managed-files pull request contains unowned changes");
     const headTree = validateTree(await api.get(
       `/repos/${repository}/git/trees/${head.object.sha}?recursive=1`));
-    identical = diff.files.length === changes.length;
+    identical = !needsReset && diff.files.length === changes.length;
     const expected = new Map(changes.map((file) => [file.path, file.content]));
     for (const changed of diff.files) {
       const entry = headTree.tree.find((item) => item.path === changed.filename);
@@ -274,7 +303,8 @@ export async function reconcile({ api, repository, bot, policy, dryRun = true })
   if (identical && pr.title === payload.title && pr.body === payload.body) {
     return { ...result, status: "unchanged" };
   }
-  if (dryRun) return { ...result, status: identical ? "would-refresh-metadata" : "would-propose" };
+  if (dryRun) return { ...result, status: needsReset ? "would-reset-and-propose" :
+    identical ? "would-refresh-metadata" : "would-propose" };
 
   const recheck = async (expectedHead) => {
     const currentMeta = await api.get(`/repos/${repository}`);
@@ -296,8 +326,16 @@ export async function reconcile({ api, repository, bot, policy, dryRun = true })
   };
 
   let newSha = head?.object.sha ?? null;
-  if (!identical) {
+  if (needsReset) {
     await recheck(newSha);
+    const reset = await api.patch(updateRefPath(repository, BRANCH), { sha: baseSha, force: true });
+    requireThat(reset?.object?.sha === baseSha,
+      "Managed-files branch reset returned no reviewed identity");
+    newSha = baseSha;
+    await recheck(newSha);
+  }
+  if (!identical) {
+    if (!needsReset) await recheck(newSha);
     if (!head) {
       await api.post(`/repos/${repository}/git/refs`, {
         ref: `refs/heads/${BRANCH}`,

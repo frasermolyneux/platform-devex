@@ -114,7 +114,14 @@ function fixture({ variable = JSON.stringify(contract()), current = null, head =
       if (endpoint.endsWith(`/git/blobs/${sourceBlobSha}`)) return blob(state.current);
       if (endpoint.endsWith(`/git/blobs/${generatedBlobSha}`)) return blob(state.headContent);
       if (endpoint.includes("/compare/")) {
-        return { files: state.diff ?? [{ filename: ".checkov.yml", status: state.current === null ? "added" : "modified" }] };
+        return {
+          status: state.compare?.status ?? "ahead",
+          ahead_by: state.compare?.ahead_by ?? 1,
+          behind_by: state.compare?.behind_by ?? 0,
+          base_commit: { sha: state.compare?.baseSha ?? state.base },
+          merge_base_commit: { sha: state.compare?.mergeBaseSha ?? state.base },
+          files: state.diff ?? [{ filename: ".checkov.yml", status: state.current === null ? "added" : "modified" }],
+        };
       }
       throw new Error(`Unexpected GET ${endpoint}`);
     },
@@ -137,6 +144,13 @@ function fixture({ variable = JSON.stringify(contract()), current = null, head =
     },
     async patch(endpoint, data) {
       state.writes.push({ method: "PATCH", endpoint, data });
+      if (endpoint === `/repos/${repository}/git/refs/heads/${encodeURIComponent(BRANCH)}`) {
+        assert.deepEqual(data, { sha: state.base, force: true });
+        state.head = data.sha;
+        if (state.pull) state.pull = makePull();
+        state.onReset?.();
+        return { object: { sha: data.sha } };
+      }
       assert.equal(endpoint, `/repos/${repository}/pulls/7`);
       state.pull = makePull({ title: data.title, body: data.body });
       state.onPublish?.();
@@ -317,6 +331,80 @@ test("refreshes metadata without another commit when owned branch content is exa
   const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: false });
   assert.equal(result.status, "metadata-updated");
   assert.deepEqual(f.state.writes.map((write) => write.method), ["PATCH"]);
+});
+
+test("resets and rebuilds an owned diverged proposal even when its final managed tree is expected", async () => {
+  const configureDivergence = (f) => {
+    f.state.headContent = f.expected;
+    f.state.compare = {
+      status: "diverged",
+      ahead_by: 1,
+      behind_by: 2,
+      mergeBaseSha: "f".repeat(40),
+    };
+  };
+
+  const dry = fixture({ current: "unsafe default-side edit\n", head: oldHeadSha, pull: true });
+  configureDivergence(dry);
+  const preview = await reconcile({ api: dry.api, repository, bot, policy, dryRun: true });
+  assert.equal(preview.status, "would-reset-and-propose");
+  assert.equal(preview.ancestry.current, false);
+  assert.equal(dry.state.writes.length, 0);
+
+  const f = fixture({ current: "unsafe default-side edit\n", head: oldHeadSha, pull: true });
+  configureDivergence(f);
+  const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: false });
+  assert.equal(result.status, "updated");
+  assert.notEqual(result.status, "metadata-updated");
+  assert.deepEqual(f.state.writes.map((write) => write.endpoint), [
+    `/repos/${repository}/git/refs/heads/${encodeURIComponent(BRANCH)}`,
+    "/graphql",
+    `/repos/${repository}/pulls/7`,
+  ]);
+  assert.deepEqual(f.state.writes[0].data, { sha: baseSha, force: true });
+  assert.equal(f.state.writes[1].data.expectedHeadOid, baseSha);
+});
+
+test("fails closed when identities race during an owned branch reset", async () => {
+  const f = fixture({ current: "unsafe default-side edit\n", head: oldHeadSha, pull: true });
+  f.state.headContent = f.expected;
+  f.state.compare = {
+    status: "diverged",
+    ahead_by: 1,
+    behind_by: 1,
+    mergeBaseSha: "f".repeat(40),
+  };
+  f.state.onReset = () => {
+    f.state.head = "9".repeat(40);
+    f.state.pull = f.makePull();
+  };
+  await assert.rejects(reconcile({ api: f.api, repository, bot, policy, dryRun: false }),
+    /pull request changed|branch source changed/);
+  assert.deepEqual(f.state.writes.map((write) => write.endpoint), [
+    `/repos/${repository}/git/refs/heads/${encodeURIComponent(BRANCH)}`,
+  ]);
+
+  const source = fixture({ current: "unsafe default-side edit\n", head: oldHeadSha, pull: true });
+  source.state.headContent = source.expected;
+  source.state.compare = {
+    status: "diverged",
+    ahead_by: 1,
+    behind_by: 1,
+    mergeBaseSha: "f".repeat(40),
+  };
+  source.state.onReset = () => { source.state.base = "8".repeat(40); };
+  await assert.rejects(reconcile({ api: source.api, repository, bot, policy, dryRun: false }),
+    /Default branch source changed/);
+  assert.deepEqual(source.state.writes.map((write) => write.endpoint), [
+    `/repos/${repository}/git/refs/heads/${encodeURIComponent(BRANCH)}`,
+  ]);
+});
+
+test("rejects incomplete or inconsistent comparison ancestry", async () => {
+  const f = fixture({ current: "old\n", head: oldHeadSha, pull: true });
+  f.state.compare = { status: "ahead", ahead_by: 1, behind_by: 1, mergeBaseSha: baseSha };
+  await assert.rejects(reconcile({ api: f.api, repository, bot, policy }), /comparison ancestry/);
+  assert.equal(f.state.writes.length, 0);
 });
 
 test("refuses human branches, human pull requests and changes outside managed paths", async () => {

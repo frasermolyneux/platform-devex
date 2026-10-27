@@ -57,6 +57,13 @@ default branch and source revision, variable content, branch identity, pull-requ
 current head. It refuses human branches or pull requests, never writes a target default branch,
 and never merges or enables auto-merge.
 
+An owned proposal is considered content-identical only when GitHub's compare response proves its
+merge base is the reviewed current default revision and it is not behind. If the deterministic
+App-owned branch has diverged, the controller rechecks every identity, force-resets only that
+owned branch ref to the reviewed current base, rechecks the reset, and atomically commits the
+complete expected managed-file drift before refreshing the existing pull request. Missing,
+inconsistent or racing ancestry/ref evidence fails closed; human branches are never reset.
+
 Scheduled runs are report-only unless the `platform-devex` repository variable
 `REPOSITORY_STANDARDS_ENABLED` is byte-for-byte `true`. Trusted Node code computes this mode;
 `TRUE`, `True`, surrounding whitespace and other values remain dry runs. Only exact enablement
