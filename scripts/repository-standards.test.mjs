@@ -243,11 +243,16 @@ test("contract validation rejects unknown versions, profiles, unsafe paths and m
   assert.doesNotThrow(() => validateContract(contract({ exceptions: [{
     rule: "CKV_SECRET_6", reason: longest,
   }] }), policy));
-  for (const separator of ["\u0085", "\u2028", "\u2029"]) {
+  for (const separator of ["\u007f", "\u0080", "\u0085", "\u009f", "\u2028", "\u2029",
+    "\ud800", "\udfff", "\ufffe", "\uffff"]) {
     assert.throws(() => validateContract(contract({ exceptions: [{
       rule: "CKV_SECRET_6", reason: `Meaningful before${separator}meaningful after`,
     }] }), policy), /malformed/);
   }
+  assert.doesNotThrow(() => validateContract(contract({ exceptions: [{
+    rule: "CKV_SECRET_6",
+    reason: "Reviewed café configuration – 日本語 and emoji ✅ remain valid Unicode.",
+  }] }), policy));
 });
 
 test("explicitly skips repositories without a variable or managed files", async () => {
