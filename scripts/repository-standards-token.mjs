@@ -69,7 +69,7 @@ export async function issueRepositoryToken({
   requireThat(Number.isSafeInteger(app?.id) && String(app.id) === appId &&
     typeof app.slug === "string" && SLUG.test(app.slug), "GitHub App identity mismatch");
   const level = writeMode ? "write" : "read";
-  const permissions = { variables: "read", contents: level, pull_requests: level };
+  const permissions = { contents: level, pull_requests: level };
   const response = await api.createInstallationToken(installationId, {
     repositories: [repository],
     permissions,

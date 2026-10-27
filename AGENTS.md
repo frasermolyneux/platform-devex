@@ -46,14 +46,17 @@ its Node tests. An empty `vars.CI_REPOSITORIES` disables the matrix; never defau
 installation repositories for this workflow.
 
 `.github/workflows/repository-standards.yml` reconciles generic repository-managed files from
-the target `REPOSITORY_STANDARDS` Actions variable. Its first generator is the versioned Checkov
-policy under `standards/checkov/`. It uses only API metadata/blobs and App-owned pull requests:
-never check out or execute target code, write default branches, touch human branches/PRs, or merge.
+the trusted `REPOSITORY_STANDARDS_CATALOG` variable on `platform-devex`. Discovery intersects
+that catalog with active App installations and passes each immutable contract through the
+matrix. Its first generator is the versioned Checkov policy under `standards/checkov/`. It uses
+only API metadata/blobs and App-owned pull requests: never check out or execute target code,
+write default branches, touch human branches/PRs, or merge.
 Scheduled writes require `REPOSITORY_STANDARDS_ENABLED` to be byte-for-byte `true`;
 trusted Node code evaluates the gate, and schedules/manual runs otherwise default to report-only.
 See `docs/repository-standards.md`.
 The reconcile matrix mints its own exact-permission installation token from
-`GH_APP_ID`, `GH_APP_INSTALLATION_ID` and `GH_APP_PEM`; the App must grant Variables: read.
+`GH_APP_ID`, `GH_APP_INSTALLATION_ID` and `GH_APP_PEM`; target tokens request only exact
+Contents and Pull requests access. The App does not need Variables permission.
 
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.

@@ -11,6 +11,7 @@ import {
   isIncompleteStatus,
   reconcile,
   renderCheckov,
+  validateCatalog,
   validateContract,
   validatePolicy,
 } from "./repository-standards.mjs";
@@ -57,17 +58,15 @@ function blob(content) {
   };
 }
 
-function fixture({ variable = JSON.stringify(contract()), current = null, head = null, pull = null } = {}) {
-  const expected = generateManagedFiles(contract(), policy)[0].content;
+function fixture({ declaredContract = contract(), current = null, head = null, pull = null } = {}) {
+  const expected = generateManagedFiles(declaredContract, policy)[0]?.content ?? null;
   const state = {
     meta: { full_name: repository, archived: false, fork: false, default_branch: "main" },
     base: baseSha,
-    variable,
     current,
     head,
     pull,
     writes: [],
-    variableReads: 0,
     baseReads: 0,
     pullsReads: 0,
     headContent: head ? expected : null,
@@ -88,12 +87,6 @@ function fixture({ variable = JSON.stringify(contract()), current = null, head =
     async get(endpoint) {
       state.onGet?.(endpoint);
       if (endpoint === `/repos/${repository}`) return structuredClone(state.meta);
-      if (endpoint.includes("/actions/variables/")) {
-        state.variableReads++;
-        state.onVariableRead?.();
-        if (state.variable === null) throw Object.assign(new Error("not found"), { status: 404 });
-        return { name: "REPOSITORY_STANDARDS", value: state.variable };
-      }
       if (endpoint.endsWith("/git/ref/heads/main")) {
         state.baseReads++;
         state.onBaseRead?.();
@@ -165,7 +158,11 @@ function fixture({ variable = JSON.stringify(contract()), current = null, head =
       return { createCommitOnBranch: { commit: { oid: newHeadSha } } };
     },
   };
-  return { api, state, expected, makePull };
+  return { api, state, expected, makePull, contract: declaredContract };
+}
+
+function run(f, extra = {}) {
+  return reconcile({ api: f.api, repository, bot, policy, contract: f.contract, ...extra });
 }
 
 test("canonical policy contains the approved profiles and exact ordered rules", () => {
@@ -275,10 +272,31 @@ test("contract validation rejects unknown versions, profiles, unsafe paths and m
   }] }), policy), /malformed/);
 });
 
-test("explicitly skips repositories without a variable or managed files", async () => {
-  assert.equal((await reconcile({ ...fixture({ variable: null }), repository, bot, policy })).status,
-    "skipped-no-variable");
-  const empty = fixture({ variable: JSON.stringify({ version: CONTRACT_VERSION, managedFiles: {} }) });
+test("catalog validation is bounded and maps exact valid repository names to validated contracts", () => {
+  const value = JSON.stringify({
+    alpha: contract(),
+    "repo.with-dots": { version: CONTRACT_VERSION, managedFiles: {} },
+  });
+  const catalog = validateCatalog(value, policy);
+  assert.deepEqual(Object.keys(catalog), ["alpha", "repo.with-dots"]);
+  assert.deepEqual(catalog.alpha, contract());
+
+  for (const invalid of [
+    "",
+    "[]",
+    JSON.stringify({ "bad/name": contract() }),
+    JSON.stringify({ alpha: { ...contract(), extra: true } }),
+  ]) {
+    assert.throws(() => validateCatalog(invalid, policy), /catalog|repository standards contract/i);
+  }
+  assert.throws(() => validateCatalog("x".repeat(48 * 1024 + 1), policy), /byte bound/);
+  assert.throws(() => validateCatalog(JSON.stringify(Object.fromEntries(
+    Array.from({ length: 257 }, (_, index) => [`repo-${index}`, { version: CONTRACT_VERSION, managedFiles: {} }]),
+  )), policy), /entry bound/);
+});
+
+test("explicitly skips declared contracts with no managed files", async () => {
+  const empty = fixture({ declaredContract: { version: CONTRACT_VERSION, managedFiles: {} } });
   assert.equal((await reconcile({ ...empty, repository, bot, policy })).status, "skipped-no-managed-files");
   assert.equal(empty.state.writes.length, 0);
 });
@@ -286,7 +304,7 @@ test("explicitly skips repositories without a variable or managed files", async 
 test("reports current content as a no-op", async () => {
   const f = fixture();
   f.state.current = f.expected;
-  const result = await reconcile({ api: f.api, repository, bot, policy });
+  const result = await run(f);
   assert.equal(result.status, "current");
   assert.deepEqual(result.changes, []);
   assert.equal(f.state.writes.length, 0);
@@ -300,18 +318,18 @@ test("accepts unrelated valid Git paths containing spaces, brackets and Unicode"
     file("src/[generated]/contract.json", "2".repeat(40)),
     file("資料/überblick.txt", "3".repeat(40)),
   ];
-  assert.equal((await reconcile({ api: f.api, repository, bot, policy })).status, "current");
+  assert.equal((await run(f)).status, "current");
 
   f.state.unrelated.push(file("", "4".repeat(40)));
-  await assert.rejects(reconcile({ api: f.api, repository, bot, policy }), /tree entry/);
+  await assert.rejects(run(f), /tree entry/);
   f.state.unrelated.pop();
   f.state.unrelated.push(file("invalid\0path", "4".repeat(40)));
-  await assert.rejects(reconcile({ api: f.api, repository, bot, policy }), /tree entry/);
+  await assert.rejects(run(f), /tree entry/);
 });
 
 test("dry run reports drift without creating a branch or pull request", async () => {
   const f = fixture({ current: "soft-fail: true\n" });
-  const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: true });
+  const result = await run(f, { dryRun: true });
   assert.equal(result.status, "would-propose");
   assert.deepEqual(result.changes, [".checkov.yml"]);
   assert.equal(f.state.writes.length, 0);
@@ -319,7 +337,7 @@ test("dry run reports drift without creating a branch or pull request", async ()
 
 test("creates an owned branch and pull request without writing the default branch", async () => {
   const f = fixture({ current: "soft-fail: true\n" });
-  const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: false });
+  const result = await run(f, { dryRun: false });
   assert.equal(result.status, "created");
   assert.equal(result.headSha, newHeadSha);
   assert.equal(result.pullRequest, 7);
@@ -338,7 +356,7 @@ test("creates an owned branch and pull request without writing the default branc
 test("updates only an App-owned branch and pull request", async () => {
   const f = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   f.state.headContent = "older proposal\n";
-  const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: false });
+  const result = await run(f, { dryRun: false });
   assert.equal(result.status, "updated");
   assert.deepEqual(f.state.writes.map((write) => write.endpoint), [
     "/graphql",
@@ -349,7 +367,7 @@ test("updates only an App-owned branch and pull request", async () => {
 test("refreshes metadata without another commit when owned branch content is exact", async () => {
   const f = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   f.state.headContent = f.expected;
-  const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: false });
+  const result = await run(f, { dryRun: false });
   assert.equal(result.status, "metadata-updated");
   assert.deepEqual(f.state.writes.map((write) => write.method), ["PATCH"]);
 });
@@ -367,14 +385,14 @@ test("reports an owned diverged proposal as stale without writes even when its f
 
   const dry = fixture({ current: "unsafe default-side edit\n", head: oldHeadSha, pull: true });
   configureDivergence(dry);
-  const preview = await reconcile({ api: dry.api, repository, bot, policy, dryRun: true });
+  const preview = await run(dry, { dryRun: true });
   assert.equal(preview.status, "stale-pr-needs-branch-update");
   assert.equal(preview.ancestry.current, false);
   assert.equal(dry.state.writes.length, 0);
 
   const f = fixture({ current: "unsafe default-side edit\n", head: oldHeadSha, pull: true });
   configureDivergence(f);
-  const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: false });
+  const result = await run(f, { dryRun: false });
   assert.equal(result.status, "stale-pr-needs-branch-update");
   assert.equal(f.state.writes.length, 0);
 });
@@ -392,7 +410,7 @@ test("a concurrent push before stale handling cannot be overwritten because no r
     f.state.head = "9".repeat(40);
     f.state.pull = f.makePull();
   };
-  const result = await reconcile({ api: f.api, repository, bot, policy, dryRun: false });
+  const result = await run(f, { dryRun: false });
   assert.equal(result.status, "stale-pr-needs-branch-update");
   assert.equal(f.state.head, "9".repeat(40));
   assert.equal(f.state.writes.length, 0);
@@ -405,30 +423,30 @@ test("a concurrent push before stale handling cannot be overwritten because no r
 test("rejects incomplete or inconsistent comparison ancestry", async () => {
   const f = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   f.state.compare = { status: "ahead", ahead_by: 1, behind_by: 1, mergeBaseSha: baseSha };
-  await assert.rejects(reconcile({ api: f.api, repository, bot, policy }), /comparison ancestry/);
+  await assert.rejects(run(f), /comparison ancestry/);
   assert.equal(f.state.writes.length, 0);
 });
 
 test("refuses human branches, human pull requests and changes outside managed paths", async () => {
   const human = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   human.state.pull.user = { type: "User", login: "human" };
-  await assert.rejects(reconcile({ api: human.api, repository, bot, policy }), /not owned/);
+  await assert.rejects(run(human), /not owned/);
 
   const extra = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   extra.state.diff = [{ filename: "README.md", status: "modified" }];
-  await assert.rejects(reconcile({ api: extra.api, repository, bot, policy }), /unowned changes/);
+  await assert.rejects(run(extra), /unowned changes/);
 
   const orphan = fixture({ current: "old\n", head: oldHeadSha });
-  await assert.rejects(reconcile({ api: orphan.api, repository, bot, policy }), /Orphan/);
+  await assert.rejects(run(orphan), /Orphan/);
 });
 
 test("fails closed on GitHub API errors", async () => {
   const f = fixture();
   f.api.get = async () => { throw Object.assign(new Error("API unavailable"), { status: 503 }); };
-  await assert.rejects(reconcile({ api: f.api, repository, bot, policy }), /API unavailable/);
+  await assert.rejects(run(f), /API unavailable/);
 });
 
-test("rechecks repository identity, default branch source and contract source before writes", async () => {
+test("rechecks repository identity and default branch source before writes", async () => {
   const identity = fixture({ current: "old\n" });
   let metadataReads = 0;
   identity.state.onGet = (endpoint) => {
@@ -436,7 +454,7 @@ test("rechecks repository identity, default branch source and contract source be
       identity.state.meta.default_branch = "trunk";
     }
   };
-  await assert.rejects(reconcile({ api: identity.api, repository, bot, policy, dryRun: false }),
+  await assert.rejects(run(identity, { dryRun: false }),
     /default branch changed/);
   assert.equal(identity.state.writes.length, 0);
 
@@ -444,26 +462,26 @@ test("rechecks repository identity, default branch source and contract source be
   source.state.onBaseRead = () => {
     if (source.state.baseReads === 2) source.state.base = "f".repeat(40);
   };
-  await assert.rejects(reconcile({ api: source.api, repository, bot, policy, dryRun: false }),
+  await assert.rejects(run(source, { dryRun: false }),
     /Default branch source changed/);
   assert.equal(source.state.writes.length, 0);
 
-  const variable = fixture({ current: "old\n" });
-  variable.state.onVariableRead = () => {
-    if (variable.state.variableReads === 2) {
-      variable.state.variable = JSON.stringify(contract({ profiles: ["base", "central-observability"] }));
-    }
-  };
-  await assert.rejects(reconcile({ api: variable.api, repository, bot, policy, dryRun: false }),
-    /standards source changed/);
-  assert.equal(variable.state.writes.length, 0);
+});
+
+test("treats the supplied catalog contract as immutable trusted input and never calls Variables APIs", async () => {
+  const f = fixture({ current: "old\n" });
+  const result = await run(f, { dryRun: false });
+  assert.equal(result.status, "created");
+  assert.equal(f.state.writes.length, 3);
+  const source = await readFile(new URL("./repository-standards.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /actions\/variables|variableSnapshot|REPOSITORY_STANDARDS(?!_(?:CATALOG|CONTRACT))/);
 });
 
 test("rejects a pull request race before publishing", async () => {
   const f = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   f.state.headContent = "older proposal\n";
   f.state.onCommit = () => { f.state.pull.number = 8; };
-  await assert.rejects(reconcile({ api: f.api, repository, bot, policy, dryRun: false }),
+  await assert.rejects(run(f, { dryRun: false }),
     /pull request changed/);
   assert.equal(f.state.writes.some((write) => write.method === "PATCH"), false);
 });
@@ -475,10 +493,18 @@ test("discovers bounded active installation repositories and validates selection
     { name: "archived", archived: true, fork: false, owner: { login: "owner" } },
     { name: "fork", archived: false, fork: true, owner: { login: "owner" } },
     { name: "foreign", archived: false, fork: false, owner: { login: "other" } },
+    { name: "uncatalogued", archived: false, fork: false, owner: { login: "owner" } },
   ] };
-  assert.deepEqual(await discoverRepositories(api, "owner"), ["alpha", "zeta"]);
-  assert.deepEqual(await discoverRepositories(api, "owner", "zeta"), ["zeta"]);
-  await assert.rejects(discoverRepositories(api, "owner", "missing"), /not an applicable/);
+  const catalog = { alpha: contract(), zeta: contract(), declaredOnly: contract() };
+  assert.deepEqual(await discoverRepositories(api, "owner", "", catalog), [
+    { repo: "alpha", contract: catalog.alpha },
+    { repo: "zeta", contract: catalog.zeta },
+  ]);
+  assert.deepEqual(await discoverRepositories(api, "owner", "zeta", catalog), [
+    { repo: "zeta", contract: catalog.zeta },
+  ]);
+  await assert.rejects(discoverRepositories(api, "owner", "missing", catalog), /not declared/);
+  await assert.rejects(discoverRepositories(api, "owner", "declaredOnly", catalog), /not an applicable/);
 });
 
 test("workflow is least-privilege, bounded, dry by default and never checks out target code", async () => {
@@ -489,17 +515,21 @@ test("workflow is least-privilege, bounded, dry by default and never checks out 
   assert.match(workflow, /max-parallel: 4/);
   assert.equal(workflow.match(/actions\/create-github-app-token@/g)?.length, 1);
   assert.doesNotMatch(workflow, /permission-variables:/);
+  assert.doesNotMatch(workflow, /actions\/variables|REPOSITORY_STANDARDS(?!_)/);
   assert.match(workflow, /run: node scripts\/repository-standards-token\.mjs/);
   assert.match(workflow, /GH_APP_INSTALLATION_ID: \$\{\{ vars\.GH_APP_INSTALLATION_ID \}\}/);
   assert.match(workflow, /REPOSITORY_STANDARDS_ENABLED: \$\{\{ vars\.REPOSITORY_STANDARDS_ENABLED \}\}/);
+  assert.match(workflow, /REPOSITORY_STANDARDS_CATALOG: \$\{\{ vars\.REPOSITORY_STANDARDS_CATALOG \}\}/);
+  assert.match(workflow, /REPOSITORY_STANDARDS_CONTRACT: \$\{\{ toJson\(matrix\.target\.contract\) \}\}/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ steps\.repository-token\.outputs\.token \}\}/);
   assert.match(workflow, /APP_BOT: \$\{\{ steps\.repository-token\.outputs\['app-bot'\] \}\}/);
   assert.match(workflow, /DRY_RUN: \$\{\{ steps\.repository-token\.outputs\['dry-run'\] \}\}/);
   assert.doesNotMatch(workflow, /REPOSITORY_STANDARDS_ENABLED\s*==/);
   assert.match(workflow, /repository: \$\{\{ github\.repository \}\}/);
-  assert.doesNotMatch(workflow, /repository: \$\{\{ matrix\.repo \}\}/);
+  assert.doesNotMatch(workflow, /repository: \$\{\{ matrix\.target\.repo \}\}/);
   assert.doesNotMatch(workflow, /merge-multiple:\s*true/);
-  assert.match(workflow, /\.status != "current" and \.status != "unchanged" and \.status != "skipped-no-variable"/);
+  assert.match(workflow, /\.status != "current" and \.status != "unchanged" and \.status != "skipped-no-managed-files"/);
+  assert.match(workflow, /Ensure metadata-only failure result[\s\S]*repository-token-issuance-failed/);
   assert.doesNotMatch(workflow, /\bgh\s+pr\s+merge\b|\/merges\b|enablePullRequestAutoMerge/);
   for (const reference of workflow.matchAll(/uses:\s+[^@\s]+@([^\s]+)/g)) {
     assert.match(reference[1], /^[a-f0-9]{40}$/, `action is not pinned by full SHA: ${reference[0]}`);

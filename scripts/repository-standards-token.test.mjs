@@ -28,7 +28,6 @@ function response(writeMode = false, overrides = {}) {
     repository_selection: "selected",
     repositories: [{ full_name: `${owner}/${repository}` }],
     permissions: {
-      variables: "read",
       contents: level,
       pull_requests: level,
       metadata: "read",
@@ -95,7 +94,7 @@ test("requests an exact read-only repository token for dry runs", async () => {
       id: installationId,
       payload: {
         repositories: [repository],
-        permissions: { variables: "read", contents: "read", pull_requests: "read" },
+        permissions: { contents: "read", pull_requests: "read" },
       },
     },
   ]);
@@ -109,7 +108,7 @@ test("requests exact write permissions only in trusted write mode", async () => 
   assert.equal(result.dryRun, false);
   assert.deepEqual(fake.calls[1].payload, {
     repositories: [repository],
-    permissions: { variables: "read", contents: "write", pull_requests: "write" },
+    permissions: { contents: "write", pull_requests: "write" },
   });
 });
 
@@ -123,7 +122,12 @@ test("validates App identity, repository scope, permissions, expiry and API fail
   }), /scope mismatch/);
   await assert.rejects(issueRepositoryToken({
     api: api(false, { response: response(false, {
-      permissions: { variables: "read", contents: "write", pull_requests: "read" },
+      permissions: { contents: "write", pull_requests: "read" },
+    }) }), ...inputs,
+  }), /unexpected permissions/);
+  await assert.rejects(issueRepositoryToken({
+    api: api(false, { response: response(false, {
+      permissions: { contents: "read", pull_requests: "read", variables: "read" },
     }) }), ...inputs,
   }), /unexpected permissions/);
   await assert.rejects(issueRepositoryToken({
