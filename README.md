@@ -13,6 +13,7 @@ frasermolyneux repositories.
 
 ## Documentation
 
+- [Managed repository standards](docs/repository-standards.md) — trusted catalog, reconciliation safety and write gates.
 - [Reviewed Terraform CLI updates](docs/terraform-cli-updates.md) — approval policy,
   scoped permissions, dry runs, schedule, race handling and human merge requirements.
 

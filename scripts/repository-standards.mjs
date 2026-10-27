@@ -4,13 +4,15 @@ import { pathToFileURL } from "node:url";
 export const BRANCH = "automation/repository-standards";
 export const MARKER = "<!-- platform-devex-repository-standards-v1 -->";
 export const CONTRACT_VERSION = "repository-standards-v1";
-const VARIABLE = "REPOSITORY_STANDARDS";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const REPOSITORY_NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const BOT = /^[A-Za-z0-9_-]+\[bot\]$/;
 const SHA = /^[a-f0-9]{40}$/;
 const RULE = /^CKV(?:2)?_[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
 const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._/-]+$/;
 const MAX_BYTES = 2 * 1024 * 1024;
+const MAX_CATALOG_BYTES = 48 * 1024;
+const MAX_CATALOG_ENTRIES = 256;
 const MAX_FILE_BYTES = 256 * 1024;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 
@@ -145,23 +147,50 @@ export function generateManagedFiles(contract, policy) {
   }));
 }
 
+export function validateCatalog(value, policy) {
+  requireThat(typeof value === "string" && value.length > 0 &&
+    Buffer.byteLength(value, "utf8") <= MAX_CATALOG_BYTES,
+  "Repository standards catalog is missing or exceeds the byte bound");
+  let catalog;
+  try { catalog = JSON.parse(value); }
+  catch { throw new Error("Invalid repository standards catalog JSON"); }
+  requireThat(catalog && typeof catalog === "object" && !Array.isArray(catalog),
+    "Repository standards catalog must be an object");
+  const entries = Object.entries(catalog);
+  requireThat(entries.length <= MAX_CATALOG_ENTRIES, "Repository standards catalog exceeds entry bound");
+  const validated = Object.create(null);
+  for (const [name, contract] of entries) {
+    requireThat(REPOSITORY_NAME.test(name), "Invalid repository standards catalog key");
+    validateContract(contract, policy);
+    validated[name] = contract;
+  }
+  return validated;
+}
+
 export function isIncompleteStatus(status) {
   return ["obsolete-pr-needs-human", "stale-pr-needs-branch-update"].includes(status);
 }
 
-export async function discoverRepositories(api, owner, selected = "") {
+export async function discoverRepositories(api, owner, selected = "", catalog = {}) {
   requireThat(/^[A-Za-z0-9-]+$/.test(owner) &&
-    (!selected || /^[A-Za-z0-9_.-]+$/.test(selected)), "Invalid repository selection");
+    (!selected || REPOSITORY_NAME.test(selected)), "Invalid repository selection");
+  requireThat(catalog && typeof catalog === "object" && !Array.isArray(catalog),
+    "Invalid repository standards catalog");
   const rows = await api.pages("/installation/repositories", "repositories", 10);
   const names = rows.filter((repo) => repo.archived === false && repo.fork === false &&
     repo.owner?.login?.toLowerCase() === owner.toLowerCase()).map((repo) => {
-    requireThat(/^[A-Za-z0-9_.-]+$/.test(repo.name), "Invalid installation repository name");
+    requireThat(REPOSITORY_NAME.test(repo.name), "Invalid installation repository name");
     return repo.name;
   });
   requireThat(names.length <= 256, "Repository matrix exceeds bound");
+  requireThat(!selected || Object.hasOwn(catalog, selected),
+    "Selected repository is not declared in the repository standards catalog");
   requireThat(!selected || names.includes(selected),
     "Selected repository is not an applicable installation repository");
-  return [...new Set(names)].filter((name) => !selected || name === selected).sort();
+  return [...new Set(names)]
+    .filter((name) => Object.hasOwn(catalog, name) && (!selected || name === selected))
+    .sort()
+    .map((name) => ({ repo: name, contract: catalog[name] }));
 }
 
 function refPath(repository, branch) {
@@ -233,15 +262,6 @@ async function readBlob(api, repository, entry) {
   return Buffer.from(blob.content, "base64").toString("utf8");
 }
 
-async function variableSnapshot(api, repository) {
-  const variable = await optionalGet(api,
-    `/repos/${repository}/actions/variables/${encodeURIComponent(VARIABLE)}`);
-  if (!variable) return null;
-  requireThat(variable.name === VARIABLE && typeof variable.value === "string" &&
-    variable.value.length <= MAX_FILE_BYTES, "Invalid repository standards variable");
-  return variable.value;
-}
-
 function pullPayload(files, baseSha) {
   const paths = files.map((file) => `- \`${file.path}\``).join("\n");
   return {
@@ -253,19 +273,14 @@ function pullPayload(files, baseSha) {
   };
 }
 
-export async function reconcile({ api, repository, bot, policy, dryRun = true }) {
+export async function reconcile({ api, repository, bot, policy, contract, dryRun = true }) {
   requireThat(REPOSITORY.test(repository) && BOT.test(bot), "Invalid repository or App identity");
   validatePolicy(policy);
+  const files = generateManagedFiles(contract, policy);
   const meta = await api.get(`/repos/${repository}`);
   requireThat(meta.full_name === repository && meta.archived === false && meta.fork === false &&
     typeof meta.default_branch === "string" && /^[A-Za-z0-9._/-]+$/.test(meta.default_branch),
   "Repository is not applicable");
-  const variableValue = await variableSnapshot(api, repository);
-  if (variableValue === null) return { repository, dryRun, status: "skipped-no-variable" };
-  let contract;
-  try { contract = JSON.parse(variableValue); }
-  catch { throw new Error("Invalid repository standards JSON"); }
-  const files = generateManagedFiles(contract, policy);
   if (!files.length) return { repository, dryRun, status: "skipped-no-managed-files" };
 
   const base = await api.get(refPath(repository, meta.default_branch));
@@ -325,8 +340,6 @@ export async function reconcile({ api, repository, bot, policy, dryRun = true })
     "Repository identity or default branch changed");
     const currentBase = await api.get(refPath(repository, meta.default_branch));
     requireThat(currentBase.object.sha === baseSha, "Default branch source changed");
-    requireThat(await variableSnapshot(api, repository) === variableValue,
-      "Repository standards source changed");
     const currentPulls = await openPulls(api, repository);
     const currentPr = ownedPull(currentPulls, repository, bot);
     requireThat(Boolean(currentPr) === Boolean(pr) && (!pr ||
@@ -441,9 +454,12 @@ async function loadPolicy() {
 
 async function main() {
   const api = new GitHubApi(process.env.GH_TOKEN);
+  const policy = await loadPolicy();
   if (process.argv[2] === "discover") {
-    const repos = await discoverRepositories(api, process.env.OWNER, process.env.SELECTED_REPOSITORY);
-    await appendFile(process.env.GITHUB_OUTPUT, `repos=${JSON.stringify(repos)}\n`);
+    const catalog = validateCatalog(process.env.REPOSITORY_STANDARDS_CATALOG, policy);
+    const targets = await discoverRepositories(
+      api, process.env.OWNER, process.env.SELECTED_REPOSITORY, catalog);
+    await appendFile(process.env.GITHUB_OUTPUT, `targets=${JSON.stringify(targets)}\n`);
     return;
   }
   requireThat(process.argv[2] === "reconcile" && ["true", "false"].includes(process.env.DRY_RUN ?? "true"),
@@ -454,7 +470,8 @@ async function main() {
       api,
       repository: process.env.REPOSITORY,
       bot: process.env.APP_BOT,
-      policy: await loadPolicy(),
+      policy,
+      contract: JSON.parse(process.env.REPOSITORY_STANDARDS_CONTRACT),
       dryRun: process.env.DRY_RUN !== "false",
     });
     if (isIncompleteStatus(result.status)) process.exitCode = 1;
