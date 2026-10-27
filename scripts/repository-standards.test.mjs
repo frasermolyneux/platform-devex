@@ -7,6 +7,7 @@ import {
   MARKER,
   discoverRepositories,
   generateManagedFiles,
+  graphemeLength,
   isIncompleteStatus,
   reconcile,
   renderCheckov,
@@ -255,6 +256,23 @@ test("contract validation rejects unknown versions, profiles, unsafe paths and m
   }] });
   assert.doesNotThrow(() => validateContract(normalUnicode, policy));
   assert.match(renderCheckov(normalUnicode.managedFiles.checkov, policy), /emoji 🚀 remain valid Unicode/);
+
+  assert.equal(graphemeLength("12345678🚀"), 9);
+  assert.throws(() => validateContract(contract({ exceptions: [{
+    rule: "CKV_SECRET_6", reason: "12345678🚀",
+  }] }), policy), /malformed/);
+  assert.equal(graphemeLength("123456789🚀"), 10);
+  assert.doesNotThrow(() => validateContract(contract({ exceptions: [{
+    rule: "CKV_SECRET_6", reason: "123456789🚀",
+  }] }), policy));
+  assert.equal(graphemeLength(`${"x".repeat(599)}🚀`), 600);
+  assert.doesNotThrow(() => validateContract(contract({ exceptions: [{
+    rule: "CKV_SECRET_6", reason: `${"x".repeat(599)}🚀`,
+  }] }), policy));
+  assert.equal(graphemeLength(`${"x".repeat(600)}🚀`), 601);
+  assert.throws(() => validateContract(contract({ exceptions: [{
+    rule: "CKV_SECRET_6", reason: `${"x".repeat(600)}🚀`,
+  }] }), policy), /malformed/);
 });
 
 test("explicitly skips repositories without a variable or managed files", async () => {
@@ -481,6 +499,7 @@ test("workflow is least-privilege, bounded, dry by default and never checks out 
   assert.match(workflow, /repository: \$\{\{ github\.repository \}\}/);
   assert.doesNotMatch(workflow, /repository: \$\{\{ matrix\.repo \}\}/);
   assert.doesNotMatch(workflow, /merge-multiple:\s*true/);
+  assert.match(workflow, /\.status != "current" and \.status != "unchanged" and \.status != "skipped-no-variable"/);
   assert.doesNotMatch(workflow, /\bgh\s+pr\s+merge\b|\/merges\b|enablePullRequestAutoMerge/);
   for (const reference of workflow.matchAll(/uses:\s+[^@\s]+@([^\s]+)/g)) {
     assert.match(reference[1], /^[a-f0-9]{40}$/, `action is not pinned by full SHA: ${reference[0]}`);

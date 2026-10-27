@@ -43,10 +43,11 @@ exceptions and unsafe canonical policy paths fail closed.
 
 The canonical `checkov-v1` policy is `standards/checkov/v1.json`. Profiles contribute ordered,
 deduplicated `skip-check` entries. Repository-specific exceptions may use only the separately
-approved `CKV_OPENAPI_21` and `CKV_SECRET_6` rules, require a trimmed reason of 10–600 characters,
-and cannot duplicate a selected profile rule. Reasons reject control characters, Unicode line
-separators, unpaired UTF-16 surrogates and the noncharacters U+FFFE/U+FFFF so their emitted YAML
-comments remain single-line and valid; normal Unicode is supported. Exceptions render in
+approved `CKV_OPENAPI_21` and `CKV_SECRET_6` rules, require a trimmed reason of 10–600 Unicode
+grapheme clusters (matching Terraform string-length semantics), and cannot duplicate a selected
+profile rule. Reasons reject control characters, Unicode line separators, unpaired UTF-16
+surrogates and the noncharacters U+FFFE/U+FFFF so their emitted YAML comments remain single-line
+and valid; normal Unicode, including supplementary emoji, is supported. Exceptions render in
 canonical policy order after profile rules. Generated `.checkov.yml` files include
 ownership/provenance, `soft-fail: false` and `compact: true`.
 

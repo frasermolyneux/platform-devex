@@ -12,6 +12,7 @@ const RULE = /^CKV(?:2)?_[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
 const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._/-]+$/;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 
 function requireThat(condition, message) {
   if (!condition) throw new Error(message);
@@ -20,6 +21,13 @@ function requireThat(condition, message) {
 function exactKeys(value, keys, message) {
   requireThat(value && typeof value === "object" && !Array.isArray(value) &&
     Object.keys(value).sort().join("\0") === [...keys].sort().join("\0"), message);
+}
+
+export function graphemeLength(value) {
+  requireThat(typeof value === "string", "Grapheme input must be a string");
+  let length = 0;
+  for (const _ of GRAPHEME_SEGMENTER.segment(value)) length++;
+  return length;
 }
 
 export function validatePolicy(policy) {
@@ -74,10 +82,13 @@ export function validateContract(contract, policy) {
     const exceptions = new Map();
     for (const exception of file.exceptions) {
       exactKeys(exception, ["rule", "reason"], "Malformed Checkov exception");
+      const reasonLength = typeof exception.reason === "string"
+        ? graphemeLength(exception.reason)
+        : -1;
       requireThat(typeof exception.rule === "string" && catalog.exceptionRules.has(exception.rule) &&
         !selectedRules.has(exception.rule) && !exceptions.has(exception.rule) &&
         typeof exception.reason === "string" && exception.reason === exception.reason.trim() &&
-        exception.reason.length >= 10 && exception.reason.length <= 600 &&
+        reasonLength >= 10 && reasonLength <= 600 &&
         !/[\u0000-\u001f\u007f-\u009f\u2028\u2029\ud800-\udfff\ufffe\uffff]/u.test(exception.reason),
       "Duplicate, unsupported, or malformed Checkov exception");
       exceptions.set(exception.rule, exception.reason);

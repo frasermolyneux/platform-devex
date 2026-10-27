@@ -163,7 +163,7 @@ jobs:
 
           activity=false
           if [[ -d results ]] && find results -type f -name repository-standards-result.json -exec \
-            jq -e 'select(.status != "current" and .status != "skipped-no-variable" and .status != "skipped-no-managed-files")' {} \; \
+            jq -e 'select(.status != "current" and .status != "unchanged" and .status != "skipped-no-variable" and .status != "skipped-no-managed-files")' {} \; \
             | grep -q .; then
             activity=true
           fi
