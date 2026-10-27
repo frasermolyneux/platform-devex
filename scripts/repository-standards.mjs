@@ -134,6 +134,10 @@ export function generateManagedFiles(contract, policy) {
   }));
 }
 
+export function isIncompleteStatus(status) {
+  return ["obsolete-pr-needs-human", "stale-pr-needs-branch-update"].includes(status);
+}
+
 export async function discoverRepositories(api, owner, selected = "") {
   requireThat(/^[A-Za-z0-9-]+$/.test(owner) &&
     (!selected || /^[A-Za-z0-9_.-]+$/.test(selected)), "Invalid repository selection");
@@ -151,10 +155,6 @@ export async function discoverRepositories(api, owner, selected = "") {
 
 function refPath(repository, branch) {
   return `/repos/${repository}/git/ref/heads/${encodeURIComponent(branch)}`;
-}
-
-function updateRefPath(repository, branch) {
-  return `/repos/${repository}/git/refs/heads/${encodeURIComponent(branch)}`;
 }
 
 async function optionalGet(api, endpoint) {
@@ -274,37 +274,38 @@ export async function reconcile({ api, repository, bot, policy, dryRun = true })
   const head = await optionalGet(api, refPath(repository, BRANCH));
   requireThat(Boolean(pr) === Boolean(head),
     "Orphan managed-files branch or missing pull request branch requires human reconciliation");
-  let identical = false, needsReset = false;
+  let identical = false;
   if (pr) {
     requireThat(pr.base.ref === meta.default_branch && pr.head.sha === head.object.sha,
       "Managed-files pull request identity changed");
     const allowed = new Set(files.map((file) => file.path));
     const diff = await api.get(`/repos/${repository}/compare/${baseSha}...${head.object.sha}`);
     const ancestry = compareAncestry(diff, baseSha);
-    needsReset = !ancestry.current;
     result.ancestry = ancestry;
     requireThat(Array.isArray(diff.files) && diff.files.length <= files.length &&
       diff.files.every((file) => allowed.has(file.filename) &&
         ["added", "modified"].includes(file.status) && !file.previous_filename),
     "Existing managed-files pull request contains unowned changes");
+    result.pullRequest = pr.number;
+    if (!ancestry.current) {
+      return { ...result, status: "stale-pr-needs-branch-update" };
+    }
     const headTree = validateTree(await api.get(
       `/repos/${repository}/git/trees/${head.object.sha}?recursive=1`));
-    identical = !needsReset && diff.files.length === changes.length;
+    identical = diff.files.length === changes.length;
     const expected = new Map(changes.map((file) => [file.path, file.content]));
     for (const changed of diff.files) {
       const entry = headTree.tree.find((item) => item.path === changed.filename);
       requireThat(entry, "Existing managed file is missing from controller branch");
       if (await readBlob(api, repository, entry) !== expected.get(changed.filename)) identical = false;
     }
-    result.pullRequest = pr.number;
   }
   if (!changes.length) return { ...result, status: pr ? "obsolete-pr-needs-human" : "current" };
   const payload = pullPayload(files, baseSha);
   if (identical && pr.title === payload.title && pr.body === payload.body) {
     return { ...result, status: "unchanged" };
   }
-  if (dryRun) return { ...result, status: needsReset ? "would-reset-and-propose" :
-    identical ? "would-refresh-metadata" : "would-propose" };
+  if (dryRun) return { ...result, status: identical ? "would-refresh-metadata" : "would-propose" };
 
   const recheck = async (expectedHead) => {
     const currentMeta = await api.get(`/repos/${repository}`);
@@ -326,16 +327,8 @@ export async function reconcile({ api, repository, bot, policy, dryRun = true })
   };
 
   let newSha = head?.object.sha ?? null;
-  if (needsReset) {
-    await recheck(newSha);
-    const reset = await api.patch(updateRefPath(repository, BRANCH), { sha: baseSha, force: true });
-    requireThat(reset?.object?.sha === baseSha,
-      "Managed-files branch reset returned no reviewed identity");
-    newSha = baseSha;
-    await recheck(newSha);
-  }
   if (!identical) {
-    if (!needsReset) await recheck(newSha);
+    await recheck(newSha);
     if (!head) {
       await api.post(`/repos/${repository}/git/refs`, {
         ref: `refs/heads/${BRANCH}`,
@@ -453,7 +446,7 @@ async function main() {
       policy: await loadPolicy(),
       dryRun: process.env.DRY_RUN !== "false",
     });
-    if (["obsolete-pr-needs-human"].includes(result.status)) process.exitCode = 1;
+    if (isIncompleteStatus(result.status)) process.exitCode = 1;
   } catch (error) {
     result = { repository: process.env.REPOSITORY, status: "incomplete", error: error.message };
     process.exitCode = 1;

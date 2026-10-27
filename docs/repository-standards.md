@@ -59,10 +59,11 @@ and never merges or enables auto-merge.
 
 An owned proposal is considered content-identical only when GitHub's compare response proves its
 merge base is the reviewed current default revision and it is not behind. If the deterministic
-App-owned branch has diverged, the controller rechecks every identity, force-resets only that
-owned branch ref to the reviewed current base, rechecks the reset, and atomically commits the
-complete expected managed-file drift before refreshing the existing pull request. Missing,
-inconsistent or racing ancestry/ref evidence fails closed; human branches are never reset.
+App-owned branch is behind or has diverged, the controller returns
+`stale-pr-needs-branch-update`, performs no branch, commit or pull-request writes, and makes the
+repository job incomplete. The existing stale-branch updater or a human must update/reconcile the
+branch before managed-file reconciliation continues. Missing or inconsistent ancestry evidence
+also fails closed. The controller never force-updates refs or resets human or App-owned branches.
 
 Scheduled runs are report-only unless the `platform-devex` repository variable
 `REPOSITORY_STANDARDS_ENABLED` is byte-for-byte `true`. Trusted Node code computes this mode;
