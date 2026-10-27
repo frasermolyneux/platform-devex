@@ -249,10 +249,12 @@ test("contract validation rejects unknown versions, profiles, unsafe paths and m
       rule: "CKV_SECRET_6", reason: `Meaningful before${separator}meaningful after`,
     }] }), policy), /malformed/);
   }
-  assert.doesNotThrow(() => validateContract(contract({ exceptions: [{
+  const normalUnicode = contract({ exceptions: [{
     rule: "CKV_SECRET_6",
-    reason: "Reviewed café configuration – 日本語 and emoji ✅ remain valid Unicode.",
-  }] }), policy));
+    reason: "Reviewed café configuration – 日本語 and emoji 🚀 remain valid Unicode.",
+  }] });
+  assert.doesNotThrow(() => validateContract(normalUnicode, policy));
+  assert.match(renderCheckov(normalUnicode.managedFiles.checkov, policy), /emoji 🚀 remain valid Unicode/);
 });
 
 test("explicitly skips repositories without a variable or managed files", async () => {

@@ -78,7 +78,7 @@ export function validateContract(contract, policy) {
         !selectedRules.has(exception.rule) && !exceptions.has(exception.rule) &&
         typeof exception.reason === "string" && exception.reason === exception.reason.trim() &&
         exception.reason.length >= 10 && exception.reason.length <= 600 &&
-        !/[\u0000-\u001f\u007f-\u009f\u2028\u2029\ud800-\udfff\ufffe\uffff]/.test(exception.reason),
+        !/[\u0000-\u001f\u007f-\u009f\u2028\u2029\ud800-\udfff\ufffe\uffff]/u.test(exception.reason),
       "Duplicate, unsupported, or malformed Checkov exception");
       exceptions.set(exception.rule, exception.reason);
     }
