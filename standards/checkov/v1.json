@@ -1,0 +1,75 @@
+{
+  "version": "checkov-v1",
+  "targetPath": ".checkov.yml",
+  "exceptionRules": [
+    "CKV_OPENAPI_21",
+    "CKV_SECRET_6"
+  ],
+  "profiles": [
+    {
+      "name": "base",
+      "rules": [
+        "CKV_AZURE_41",
+        "CKV_AZURE_114",
+        "CKV_GHA_7",
+        "CKV_GIT_1"
+      ]
+    },
+    {
+      "name": "cost-optimised",
+      "rules": [
+        "CKV2_AZURE_1",
+        "CKV2_AZURE_22",
+        "CKV_AZURE_199",
+        "CKV_AZURE_201",
+        "CKV_AZURE_206",
+        "CKV_AZURE_212",
+        "CKV_AZURE_225",
+        "CKV_AZURE_229",
+        "CKV_AZURE_233",
+        "CKV_AZURE_165",
+        "CKV_AZURE_211",
+        "CKV_AZURE_188",
+        "CKV_AZURE_224"
+      ]
+    },
+    {
+      "name": "public-endpoints",
+      "rules": [
+        "CKV2_AZURE_33",
+        "CKV_AZURE_109",
+        "CKV_AZURE_189",
+        "CKV2_AZURE_32",
+        "CKV_AZURE_222",
+        "CKV_AZURE_221",
+        "CKV_AZURE_107",
+        "CKV_AZURE_174",
+        "CKV_AZURE_134",
+        "CKV_AZURE_139",
+        "CKV_AZURE_204",
+        "CKV_AZURE_113",
+        "CKV2_AZURE_45"
+      ]
+    },
+    {
+      "name": "app-service-standard",
+      "rules": [
+        "CKV_AZURE_88",
+        "CKV_AZURE_13",
+        "CKV_AZURE_17"
+      ]
+    },
+    {
+      "name": "central-observability",
+      "rules": [
+        "CKV_AZURE_33",
+        "CKV2_AZURE_21",
+        "CKV2_AZURE_20",
+        "CKV_AZURE_63",
+        "CKV_AZURE_65",
+        "CKV_AZURE_66",
+        "CKV_AZURE_24"
+      ]
+    }
+  ]
+}
