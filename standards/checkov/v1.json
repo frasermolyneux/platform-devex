@@ -71,7 +71,7 @@
     {
       "name": "public-endpoints-resource-scoped",
       "rules": [
-        "CKV_AZURE_109",
+        "CKV2_AZURE_33",
         "CKV_AZURE_189",
         "CKV2_AZURE_32",
         "CKV_AZURE_222",

@@ -180,7 +180,7 @@ test("canonical policy contains the approved profiles and exact ordered rules", 
     "public-endpoints": ["CKV2_AZURE_33", "CKV_AZURE_109", "CKV_AZURE_189", "CKV2_AZURE_32",
       "CKV_AZURE_222", "CKV_AZURE_221", "CKV_AZURE_107", "CKV_AZURE_174", "CKV_AZURE_134",
       "CKV_AZURE_139", "CKV_AZURE_204", "CKV_AZURE_113", "CKV2_AZURE_45"],
-    "public-endpoints-resource-scoped": ["CKV_AZURE_109", "CKV_AZURE_189", "CKV2_AZURE_32",
+    "public-endpoints-resource-scoped": ["CKV2_AZURE_33", "CKV_AZURE_189", "CKV2_AZURE_32",
       "CKV_AZURE_222", "CKV_AZURE_221", "CKV_AZURE_107", "CKV_AZURE_174", "CKV_AZURE_134",
       "CKV_AZURE_139", "CKV_AZURE_204", "CKV_AZURE_113", "CKV2_AZURE_45"],
     "app-service-standard": ["CKV_AZURE_88", "CKV_AZURE_13", "CKV_AZURE_17"],
@@ -192,7 +192,7 @@ test("canonical policy contains the approved profiles and exact ordered rules", 
 test("resource-scoped profiles leave only their specific control enforced without changing other exemptions", () => {
   for (const [original, enforced] of [
     ["cost-optimised", "CKV_AZURE_225"],
-    ["public-endpoints", "CKV2_AZURE_33"],
+    ["public-endpoints", "CKV_AZURE_109"],
   ]) {
     const profiles = ["base", "cost-optimised", "public-endpoints", "app-service-standard", "central-observability"];
     const baseline = renderCheckov(contract({ profiles, exceptions: [] }).managedFiles.checkov, policy);

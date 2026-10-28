@@ -60,7 +60,7 @@ ownership/provenance, `soft-fail: false` and `compact: true`.
 Two narrower profiles preserve resource-local exemptions without suppressing their controls
 repository-wide. `cost-optimised-resource-scoped` retains the ordered `cost-optimised` rules
 except `CKV_AZURE_225`; `public-endpoints-resource-scoped` retains `public-endpoints` except
-`CKV2_AZURE_33`. The original profiles are unchanged. Select a scoped variant instead of its
+`CKV_AZURE_109` (the Key Vault firewall check). The original profiles are unchanged. Select a scoped variant instead of its
 original, never alongside it, through the reviewed platform-workloads catalog. The excluded
 global suppression must be justified only on the exceptional Terraform resource: Sitewatch's
 FC1 plan or Baremetal's workload secret vaults. Other plans and management/runtime vaults
