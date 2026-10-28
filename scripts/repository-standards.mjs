@@ -76,6 +76,9 @@ export function validateContract(contract, policy) {
       file.profiles.length <= policy.profiles.length &&
       file.profiles.every((name) => typeof name === "string" && catalog.names.has(name)) &&
       new Set(file.profiles).size === file.profiles.length, "Unknown or duplicate Checkov profile");
+    requireThat(!file.profiles.some((name) => name.endsWith("-resource-scoped") &&
+      file.profiles.includes(name.slice(0, -"-resource-scoped".length))),
+    "A resource-scoped profile cannot be combined with its repository-wide profile");
     requireThat(Array.isArray(file.exceptions) && file.exceptions.length <= 128,
       "Invalid Checkov exceptions");
     const selectedRules = new Set(policy.profiles
