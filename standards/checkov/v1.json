@@ -34,9 +34,43 @@
       ]
     },
     {
+      "name": "cost-optimised-resource-scoped",
+      "rules": [
+        "CKV2_AZURE_1",
+        "CKV2_AZURE_22",
+        "CKV_AZURE_199",
+        "CKV_AZURE_201",
+        "CKV_AZURE_206",
+        "CKV_AZURE_212",
+        "CKV_AZURE_229",
+        "CKV_AZURE_233",
+        "CKV_AZURE_165",
+        "CKV_AZURE_211",
+        "CKV_AZURE_188",
+        "CKV_AZURE_224"
+      ]
+    },
+    {
       "name": "public-endpoints",
       "rules": [
         "CKV2_AZURE_33",
+        "CKV_AZURE_109",
+        "CKV_AZURE_189",
+        "CKV2_AZURE_32",
+        "CKV_AZURE_222",
+        "CKV_AZURE_221",
+        "CKV_AZURE_107",
+        "CKV_AZURE_174",
+        "CKV_AZURE_134",
+        "CKV_AZURE_139",
+        "CKV_AZURE_204",
+        "CKV_AZURE_113",
+        "CKV2_AZURE_45"
+      ]
+    },
+    {
+      "name": "public-endpoints-resource-scoped",
+      "rules": [
         "CKV_AZURE_109",
         "CKV_AZURE_189",
         "CKV2_AZURE_32",

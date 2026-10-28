@@ -174,13 +174,45 @@ test("canonical policy contains the approved profiles and exact ordered rules", 
     "cost-optimised": ["CKV2_AZURE_1", "CKV2_AZURE_22", "CKV_AZURE_199", "CKV_AZURE_201",
       "CKV_AZURE_206", "CKV_AZURE_212", "CKV_AZURE_225", "CKV_AZURE_229", "CKV_AZURE_233",
       "CKV_AZURE_165", "CKV_AZURE_211", "CKV_AZURE_188", "CKV_AZURE_224"],
+    "cost-optimised-resource-scoped": ["CKV2_AZURE_1", "CKV2_AZURE_22", "CKV_AZURE_199", "CKV_AZURE_201",
+      "CKV_AZURE_206", "CKV_AZURE_212", "CKV_AZURE_229", "CKV_AZURE_233",
+      "CKV_AZURE_165", "CKV_AZURE_211", "CKV_AZURE_188", "CKV_AZURE_224"],
     "public-endpoints": ["CKV2_AZURE_33", "CKV_AZURE_109", "CKV_AZURE_189", "CKV2_AZURE_32",
+      "CKV_AZURE_222", "CKV_AZURE_221", "CKV_AZURE_107", "CKV_AZURE_174", "CKV_AZURE_134",
+      "CKV_AZURE_139", "CKV_AZURE_204", "CKV_AZURE_113", "CKV2_AZURE_45"],
+    "public-endpoints-resource-scoped": ["CKV_AZURE_109", "CKV_AZURE_189", "CKV2_AZURE_32",
       "CKV_AZURE_222", "CKV_AZURE_221", "CKV_AZURE_107", "CKV_AZURE_174", "CKV_AZURE_134",
       "CKV_AZURE_139", "CKV_AZURE_204", "CKV_AZURE_113", "CKV2_AZURE_45"],
     "app-service-standard": ["CKV_AZURE_88", "CKV_AZURE_13", "CKV_AZURE_17"],
     "central-observability": ["CKV_AZURE_33", "CKV2_AZURE_21", "CKV2_AZURE_20", "CKV_AZURE_63",
       "CKV_AZURE_65", "CKV_AZURE_66", "CKV_AZURE_24"],
   });
+});
+
+test("resource-scoped profiles leave only their specific control enforced without changing other exemptions", () => {
+  for (const [original, enforced] of [
+    ["cost-optimised", "CKV_AZURE_225"],
+    ["public-endpoints", "CKV2_AZURE_33"],
+  ]) {
+    const profiles = ["base", "cost-optimised", "public-endpoints", "app-service-standard", "central-observability"];
+    const baseline = renderCheckov(contract({ profiles, exceptions: [] }).managedFiles.checkov, policy);
+    const scoped = renderCheckov(contract({
+      profiles: profiles.map((name) => name === original ? `${name}-resource-scoped` : name),
+      exceptions: [],
+    }).managedFiles.checkov, policy);
+    const rules = (text) => [...text.matchAll(/^  - (\S+)$/gm)].map((match) => match[1]);
+    assert.deepEqual(rules(scoped), rules(baseline).filter((rule) => rule !== enforced));
+    assert.ok(scoped.indexOf(`# Profile: ${original}-resource-scoped`) <
+      scoped.indexOf("# Profile: app-service-standard"));
+    assert.throws(() => renderCheckov(contract({
+      profiles: [original, `${original}-resource-scoped`],
+      exceptions: [],
+    }).managedFiles.checkov, policy), /cannot be combined/);
+    assert.throws(() => renderCheckov(contract({
+      profiles: [`${original}-resource-scoped`],
+      exceptions: [{ rule: enforced, reason: "This control must remain scoped to the target resource." }],
+    }).managedFiles.checkov, policy), /unsupported/);
+  }
 });
 
 test("renders deterministic fail-closed compact Checkov configuration with provenance and reasons", () => {
