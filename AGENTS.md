@@ -48,7 +48,8 @@ installation repositories for this workflow.
 `.github/workflows/repository-standards.yml` reconciles generic repository-managed files from
 the trusted `REPOSITORY_STANDARDS_CATALOG` variable on `platform-devex`. Discovery intersects
 that catalog with active App installations and passes each immutable contract through the
-matrix. Its first generator is the versioned Checkov policy under `standards/checkov/`. It uses
+matrix. Its generators are the versioned Checkov policy under `standards/checkov/` and the
+marked .NET analyzer policy under `standards/editorconfig/`. It uses
 only API metadata/blobs and App-owned pull requests: never check out or execute target code,
 write default branches, touch human branches/PRs, or merge.
 Scheduled writes require `REPOSITORY_STANDARDS_ENABLED` to be byte-for-byte `true`;
@@ -75,6 +76,7 @@ The repository itself is provisioned through `platform-workloads` (catalog entry
   bounded review fixes and human escalation.
 - `scripts/repository-standards.mjs` — generic managed-files contract, rendering and safe PR controller.
 - `standards/checkov/v1.json` — canonical approved Checkov profiles and rules.
+- `standards/editorconfig/v1.json` — canonical curated low-noise Roslyn diagnostic policy.
 - `README.md` — repository overview and manual run instructions.
 
 ## Useful commands
