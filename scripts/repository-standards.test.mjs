@@ -267,11 +267,11 @@ test("canonical editorconfig policy suppresses only the approved low-noise diagn
       "CA1311", "CA1510", "CA1512", "CA1707", "CA1711", "CA1716", "CA1720", "CA1727",
       "CA1805", "CA1822", "CA1825", "CA1826", "CA1829", "CA1841", "CA1847", "CA1850",
       "CA1852", "CA1854", "CA1859", "CA1860", "CA1861", "CA1862", "CA1864", "CA1865",
-      "CA1866", "CA1869", "CA2249", "SYSLIB1044", "SYSLIB1045", "xUnit2032", "AV0025",
+      "CA1866", "CA1869", "CA2016", "CA2249", "SYSLIB1044", "SYSLIB1045", "xUnit2032", "AV0025",
       "IDE0004", "IDE0007", "IDE0010", "IDE0017", "IDE0018", "IDE0019", "IDE0021",
       "IDE0028", "IDE0031", "IDE0032", "IDE0037", "IDE0039", "IDE0040", "IDE0042",
       "IDE0044", "IDE0045", "IDE0047", "IDE0048", "IDE0051", "IDE0052", "IDE0059",
-      "IDE0060", "IDE0061", "IDE0063", "IDE0078", "IDE0090", "IDE0100", "IDE0200",
+      "IDE0060", "IDE0061", "IDE0063", "IDE0072", "IDE0078", "IDE0090", "IDE0100", "IDE0200",
       "IDE0240", "IDE0270", "IDE0301", "IDE0305", "IDE0306", "IDE0330", "IDE0350",
       "IDE0390", "IDE1006",
     ]);
@@ -347,6 +347,11 @@ test("renders and replaces a bounded managed editorconfig section without changi
     assert.match(section, /repository-standards-v1 \/ dotnet-editorconfig-v1/);
     assert.match(section, /dotnet_diagnostic\.CS1591\.severity = none/);
     assert.doesNotMatch(section, /CA2016|CS8602|xUnit/);
+    const actionableSection = renderEditorConfig(
+      editorContract({ profiles: ["curated-low-noise", "actionable-only"] }).managedFiles.editorconfig,
+      editorPolicy);
+    assert.match(actionableSection, /dotnet_diagnostic\.CA2016\.severity = none/);
+    assert.match(actionableSection, /dotnet_diagnostic\.IDE0072\.severity = none/);
 
     const source = "root = true\n\n[*.cs]\nindent_size = 4\n";
     const appended = applyEditorConfig(source, declared, editorPolicy);

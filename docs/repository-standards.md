@@ -89,10 +89,11 @@ The canonical `dotnet-editorconfig-v1` policy is `standards/editorconfig/v1.json
 ConfigureAwait and logging micro-optimisation diagnostics. `actionable-only` extends that
 baseline across the remaining documentation, naming, globalization, modernisation,
 micro-performance and style diagnostics observed in the estate. It deliberately retains
-compiler and nullability failures, cancellation propagation, resource lifetime, exception and
-logging correctness, ASP.NET correctness and xUnit lifecycle diagnostics. Every suppression has
-a canonical reason and is intended for staged re-enablement after the actionable backlog is
-controlled.
+compiler and nullability failures, resource lifetime, exception and logging correctness,
+ASP.NET correctness and xUnit lifecycle diagnostics. The duplicate compiler `CA2016`
+cancellation diagnostic is suppressed while Sonar's `S8949` cancellation rule remains visible.
+Every suppression has a canonical reason and is intended for staged re-enablement after the
+actionable backlog is controlled.
 
 The repository root `.editorconfig` is created when absent. Otherwise the controller appends or
 replaces only the exact section between its `BEGIN` and `END` markers, preserving all
