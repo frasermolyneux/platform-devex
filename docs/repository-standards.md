@@ -37,7 +37,21 @@ The catalog is an exact JSON object mapping repository names to contracts:
       },
       "editorconfig": {
         "version": "dotnet-editorconfig-v1",
-        "profiles": ["curated-low-noise"]
+        "profiles": ["curated-low-noise", "actionable-only"]
+      },
+      "sonar": {
+        "version": "sonar-policy-v1",
+        "profiles": ["actionable-only", "common-vendor-assets"],
+        "exclusions": [
+          {
+            "pattern": "Web/wwwroot/less/**",
+            "reason": "The reviewed path contains third-party source assets retained for the application build."
+          }
+        ]
+      },
+      "eslint": {
+        "version": "eslint-ignore-v1",
+        "profiles": ["common-vendor-assets"]
       }
     }
   }
@@ -46,7 +60,7 @@ The catalog is an exact JSON object mapping repository names to contracts:
 
 The catalog is bounded to 48 KiB and 256 entries. Every key must be a valid repository name and
 every value must pass the existing strict `repository-standards-v1` contract and policy
-validation. `managedFiles` has exact `checkov` and `editorconfig` keys and may be `{}` to
+validation. `managedFiles` has exact `checkov`, `editorconfig`, `sonar` and `eslint` keys and may be `{}` to
 declare no managed files. Target paths and file types are controller-owned: repositories
 cannot select a path or generator. Unknown contract or policy versions, unknown or duplicate
 profiles, extra keys, malformed exceptions and unsafe canonical policy paths fail closed.
@@ -70,11 +84,15 @@ global suppression must be justified only on the exceptional Terraform resource:
 FC1 plan or Baremetal's workload secret vaults. Other plans and management/runtime vaults
 remain checked. These controls are not added to the repository-global exception allowlist.
 
-The canonical `dotnet-editorconfig-v1` policy is `standards/editorconfig/v1.json`. Its
-`curated-low-noise` profile suppresses exactly the reviewed high-volume documentation,
-code-style, ConfigureAwait and logging micro-optimisation diagnostics. It does not suppress
-nullability, compiler correctness, resource usage, cancellation, test, reliability or security
-diagnostics. Each downgrade carries a canonical reason in the generated section.
+The canonical `dotnet-editorconfig-v1` policy is `standards/editorconfig/v1.json`.
+`curated-low-noise` suppresses the first reviewed high-volume documentation, code-style,
+ConfigureAwait and logging micro-optimisation diagnostics. `actionable-only` extends that
+baseline across the remaining documentation, naming, globalization, modernisation,
+micro-performance and style diagnostics observed in the estate. It deliberately retains
+compiler and nullability failures, cancellation propagation, resource lifetime, exception and
+logging correctness, ASP.NET correctness and xUnit lifecycle diagnostics. Every suppression has
+a canonical reason and is intended for staged re-enablement after the actionable backlog is
+controlled.
 
 The repository root `.editorconfig` is created when absent. Otherwise the controller appends or
 replaces only the exact section between its `BEGIN` and `END` markers, preserving all
@@ -82,6 +100,25 @@ repository-owned content. Existing nested `.editorconfig` files are also updated
 already contain a managed marker or explicitly set one of the managed diagnostics; generated-code
 only nested configurations remain untouched. Missing, duplicated or unbalanced markers fail
 closed rather than replacing ambiguous content.
+
+The canonical `sonar-policy-v1` policy is `standards/sonar/v1.json` and renders the whole
+`.sonarcloud.json` file. Its `actionable-only` profile suppresses reviewed maintainability,
+style, test-heuristic and micro-performance rules. Accessibility heuristics are temporarily
+staged out and explicitly documented for progressive re-enablement. Security, vulnerability,
+reliability, cancellation, nullability, unsafe-code, CSRF, regular-expression backtracking,
+workflow-security and infrastructure rules are not suppressed. `common-vendor-assets` excludes
+only package, vendor, `wwwroot/lib` and minified distribution paths.
+
+Repository-specific Sonar exclusions remain workload declarations. Each exclusion requires a
+single safe relative glob and a reviewed 10–240 grapheme reason; commas, whitespace,
+backslashes, traversal and absolute paths are rejected so the generated file cannot become a
+scanner-argument injection surface. The scanner workflow separately validates this generated
+format before translating it into Sonar properties.
+
+The canonical `eslint-ignore-v1` policy is `standards/eslint/v1.json` and renders the whole
+`.eslintignore` file. It excludes the same high-confidence JavaScript dependency and
+distribution paths while leaving first-party DOM and injection findings visible. Both managed
+whole-file formats include deterministic provenance and profile selection.
 
 ## Pull-request reconciliation
 

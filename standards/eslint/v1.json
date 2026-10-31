@@ -1,0 +1,27 @@
+{
+  "version": "eslint-ignore-v1",
+  "targetPath": ".eslintignore",
+  "profiles": [
+    {
+      "name": "common-vendor-assets",
+      "exclusions": [
+        {
+          "pattern": "**/node_modules/**",
+          "reason": "Package-manager dependencies are third-party inputs and are not maintained source."
+        },
+        {
+          "pattern": "**/vendor/**",
+          "reason": "Vendored dependencies are third-party inputs and are not maintained source."
+        },
+        {
+          "pattern": "**/wwwroot/lib/**",
+          "reason": "Client libraries under wwwroot are vendored assets and are not maintained source."
+        },
+        {
+          "pattern": "**/*.min.js",
+          "reason": "Minified JavaScript is a generated distribution asset rather than maintained source."
+        }
+      ]
+    }
+  ]
+}
