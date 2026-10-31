@@ -197,6 +197,10 @@
           "reason": "JsonSerializerOptions caching is a micro-optimisation deferred from the initial baseline."
         },
         {
+          "id": "CA2016",
+          "reason": "Sonar's retained S8949 rule reports cancellation-token forwarding, so the duplicate compiler diagnostic is suppressed."
+        },
+        {
           "id": "CA2249",
           "reason": "String contains API adoption is a modernisation preference rather than a correctness defect."
         },

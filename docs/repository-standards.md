@@ -89,10 +89,11 @@ The canonical `dotnet-editorconfig-v1` policy is `standards/editorconfig/v1.json
 ConfigureAwait and logging micro-optimisation diagnostics. `actionable-only` extends that
 baseline across the remaining documentation, naming, globalization, modernisation,
 micro-performance and style diagnostics observed in the estate. It deliberately retains
-compiler and nullability failures, cancellation propagation, resource lifetime, exception and
-logging correctness, ASP.NET correctness and xUnit lifecycle diagnostics. Every suppression has
-a canonical reason and is intended for staged re-enablement after the actionable backlog is
-controlled.
+compiler and nullability failures, resource lifetime, exception and logging correctness,
+ASP.NET correctness and xUnit lifecycle diagnostics. The duplicate compiler `CA2016`
+cancellation diagnostic is suppressed while Sonar's `S8949` cancellation rule remains visible.
+Every suppression has a canonical reason and is intended for staged re-enablement after the
+actionable backlog is controlled.
 
 The repository root `.editorconfig` is created when absent. Otherwise the controller appends or
 replaces only the exact section between its `BEGIN` and `END` markers, preserving all
@@ -104,13 +105,10 @@ closed rather than replacing ambiguous content.
 The canonical `sonar-policy-v1` policy is `standards/sonar/v1.json` and renders the whole
 `.sonarcloud.json` file. Its `actionable-only` profile suppresses reviewed maintainability,
 style, test-heuristic and micro-performance rules. Accessibility heuristics are temporarily
-staged out and explicitly documented for progressive re-enablement. Imported Roslyn `CA2016`
-is also hidden in Sonar because the retained native `S8949` rule reports the same
-cancellation-token forwarding locations; the compiler diagnostic remains enabled outside
-Sonar. Security, vulnerability, reliability, native cancellation, nullability, unsafe-code,
-CSRF, regular-expression backtracking, workflow-security and infrastructure rules are not
-suppressed. `common-vendor-assets` excludes only package, vendor, `wwwroot/lib` and minified
-distribution paths.
+staged out and explicitly documented for progressive re-enablement. Security, vulnerability,
+reliability, cancellation, nullability, unsafe-code, CSRF, regular-expression backtracking,
+workflow-security and infrastructure rules are not suppressed. `common-vendor-assets` excludes
+only package, vendor, `wwwroot/lib` and minified distribution paths.
 
 Repository-specific Sonar exclusions remain workload declarations. Each exclusion requires a
 single safe relative glob and a reviewed 10–240 grapheme reason; commas, whitespace,

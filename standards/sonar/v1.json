@@ -18,10 +18,6 @@
           "reason": "Overlapping optional overloads are retained unless they cause a demonstrated correctness problem."
         },
         {
-          "key": "external_roslyn:CA2016",
-          "reason": "Sonar's cancellation-token forwarding rule remains authoritative; this imported Roslyn diagnostic duplicates the same locations."
-        },
-        {
           "key": "javascript:S2004",
           "reason": "Nesting depth is deferred as maintainability work under the initial actionable-only baseline."
         },
