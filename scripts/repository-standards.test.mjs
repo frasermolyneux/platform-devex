@@ -224,6 +224,7 @@ test("canonical editorconfig policy suppresses only the approved low-noise diagn
       "IDE0046",
       "IDE0290",
       "IDE0300",
+      "IDE0370",
     ]);
     assert.ok(editorPolicy.profiles[0].rules.every((rule) => rule.reason.length >= 10));
 });

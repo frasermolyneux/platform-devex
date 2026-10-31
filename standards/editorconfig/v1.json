@@ -50,6 +50,10 @@
         {
           "id": "IDE0300",
           "reason": "Collection-expression adoption is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0370",
+          "reason": "Redundant suppression cleanup is low-value churn when the centrally managed policy changes diagnostic severity."
         }
       ]
     }
