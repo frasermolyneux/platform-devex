@@ -5,14 +5,17 @@ import {
   BRANCH,
   CONTRACT_VERSION,
   MARKER,
+  applyEditorConfig,
   discoverRepositories,
   generateManagedFiles,
   graphemeLength,
   isIncompleteStatus,
   reconcile,
   renderCheckov,
+  renderEditorConfig,
   validateCatalog,
   validateContract,
+  validateEditorConfigPolicy,
   validatePolicy,
 } from "./repository-standards.mjs";
 
@@ -24,6 +27,9 @@ const newHeadSha = "c".repeat(40);
 const sourceBlobSha = "d".repeat(40);
 const generatedBlobSha = "e".repeat(40);
 const policy = JSON.parse(await readFile(new URL("../standards/checkov/v1.json", import.meta.url), "utf8"));
+const editorPolicy = JSON.parse(await readFile(
+  new URL("../standards/editorconfig/v1.json", import.meta.url), "utf8"));
+const policies = { checkov: policy, editorconfig: editorPolicy };
 
 function contract(overrides = {}) {
   return {
@@ -36,6 +42,19 @@ function contract(overrides = {}) {
           rule: "CKV_OPENAPI_21",
           reason: "Approved because this repository uses the shared platform control.",
         }],
+        ...overrides,
+      },
+    },
+  };
+}
+
+function editorContract(overrides = {}) {
+  return {
+    version: CONTRACT_VERSION,
+    managedFiles: {
+      editorconfig: {
+        version: "dotnet-editorconfig-v1",
+        profiles: ["curated-low-noise"],
         ...overrides,
       },
     },
@@ -187,6 +206,84 @@ test("canonical policy contains the approved profiles and exact ordered rules", 
     "central-observability": ["CKV_AZURE_33", "CKV2_AZURE_21", "CKV2_AZURE_20", "CKV_AZURE_63",
       "CKV_AZURE_65", "CKV_AZURE_66", "CKV_AZURE_24"],
   });
+});
+
+test("canonical editorconfig policy suppresses only the approved low-noise diagnostics", () => {
+    validateEditorConfigPolicy(editorPolicy);
+    assert.equal(editorPolicy.version, "dotnet-editorconfig-v1");
+    assert.deepEqual(editorPolicy.profiles.map((profile) => profile.name), ["curated-low-noise"]);
+    assert.deepEqual(editorPolicy.profiles[0].rules.map((rule) => rule.id), [
+      "CS1591",
+      "IDE0058",
+      "IDE0022",
+      "CA2007",
+      "CA1848",
+      "IDE0130",
+      "IDE0161",
+      "CA1873",
+      "IDE0046",
+      "IDE0290",
+      "IDE0300",
+    ]);
+    assert.ok(editorPolicy.profiles[0].rules.every((rule) => rule.reason.length >= 10));
+});
+
+test("renders and replaces a bounded managed editorconfig section without changing repository content", () => {
+    const declared = editorContract().managedFiles.editorconfig;
+    const section = renderEditorConfig(declared, editorPolicy);
+    assert.match(section, /^# BEGIN platform-devex managed/m);
+    assert.match(section, /repository-standards-v1 \/ dotnet-editorconfig-v1/);
+    assert.match(section, /dotnet_diagnostic\.CS1591\.severity = none/);
+    assert.doesNotMatch(section, /CA2016|CS8602|xUnit/);
+
+    const source = "root = true\n\n[*.cs]\nindent_size = 4\n";
+    const appended = applyEditorConfig(source, declared, editorPolicy);
+    assert.ok(appended.startsWith(source));
+    assert.equal(appended.match(/BEGIN platform-devex/g)?.length, 1);
+    assert.equal(appended.match(/END platform-devex/g)?.length, 1);
+
+    const changedPolicy = structuredClone(editorPolicy);
+    changedPolicy.profiles[0].rules[0].reason = "Updated documented rationale remains bounded and deterministic.";
+    const replaced = applyEditorConfig(appended, declared, changedPolicy);
+    assert.match(replaced, /Updated documented rationale/);
+    assert.equal(replaced.match(/BEGIN platform-devex/g)?.length, 1);
+    assert.ok(replaced.startsWith(source));
+
+    const windows = applyEditorConfig(source.replaceAll("\n", "\r\n"), declared, editorPolicy);
+    assert.ok(windows.includes("\r\n"));
+    assert.doesNotMatch(windows.replaceAll("\r\n", ""), /\n/);
+});
+
+test("creates a root editorconfig and updates only nested files that override managed diagnostics", () => {
+    const declared = editorContract();
+    const files = generateManagedFiles(declared, policies, new Map([
+      ["src/.editorconfig", "[*.cs]\ndotnet_diagnostic.CA1848.severity = suggestion\n"],
+      ["src/Migrations/.editorconfig", "[*.cs]\ngenerated_code = true\n"],
+    ]));
+    assert.deepEqual(files.map((file) => file.path), [".editorconfig", "src/.editorconfig"]);
+    assert.match(files[0].content, /^root = true\n\n# BEGIN/);
+    assert.match(files[1].content, /dotnet_diagnostic\.CA1848\.severity = suggestion[\s\S]+dotnet_diagnostic\.CA1848\.severity = none/);
+    assert.doesNotMatch(JSON.stringify(files), /Migrations/);
+});
+
+test("editorconfig policy and contract reject malformed markers, rules, versions and profiles", () => {
+    const duplicate = structuredClone(editorPolicy);
+    duplicate.profiles[0].rules.push(structuredClone(duplicate.profiles[0].rules[0]));
+    assert.throws(() => validateEditorConfigPolicy(duplicate), /duplicate/);
+
+    const unsafeReason = structuredClone(editorPolicy);
+    unsafeReason.profiles[0].rules[0].reason = "unsafe\nreason";
+    assert.throws(() => validateEditorConfigPolicy(unsafeReason), /rule/);
+
+    assert.throws(() => validateContract(editorContract({ version: "dotnet-editorconfig-v2" }), policies),
+      /version or profile/);
+    assert.throws(() => validateContract(editorContract({ profiles: ["unknown"] }), policies),
+      /version or profile/);
+    assert.throws(() => applyEditorConfig(
+      `${editorPolicy.beginMarker}\nmissing end\n`,
+      editorContract().managedFiles.editorconfig,
+      editorPolicy,
+    ), /Malformed/);
 });
 
 test("resource-scoped profiles leave only their specific control enforced without changing other exemptions", () => {
@@ -467,6 +564,10 @@ test("refuses human branches, human pull requests and changes outside managed pa
   const extra = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   extra.state.diff = [{ filename: "README.md", status: "modified" }];
   await assert.rejects(run(extra), /unowned changes/);
+
+  const noLongerDrifting = fixture({ current: "old\n", head: oldHeadSha, pull: true });
+  noLongerDrifting.state.current = noLongerDrifting.expected;
+  await assert.rejects(run(noLongerDrifting), /unowned changes/);
 
   const orphan = fixture({ current: "old\n", head: oldHeadSha });
   await assert.rejects(run(orphan), /Orphan/);

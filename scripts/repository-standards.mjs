@@ -9,6 +9,7 @@ const REPOSITORY_NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const BOT = /^[A-Za-z0-9_-]+\[bot\]$/;
 const SHA = /^[a-f0-9]{40}$/;
 const RULE = /^CKV(?:2)?_[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
+const DIAGNOSTIC = /^(?:CA|CS|IDE)[0-9]{4}$/;
 const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._/-]+$/;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_CATALOG_BYTES = 48 * 1024;
@@ -60,28 +61,71 @@ export function validatePolicy(policy) {
   return { policy, names, rules, exceptionRules };
 }
 
-export function validateContract(contract, policy) {
-  const catalog = validatePolicy(policy);
+export function validateEditorConfigPolicy(policy) {
+  exactKeys(policy, ["version", "targetPath", "beginMarker", "endMarker", "profiles"],
+    "Invalid editorconfig policy");
+  requireThat(policy.version === "dotnet-editorconfig-v1" && policy.targetPath === ".editorconfig" &&
+    SAFE_PATH.test(policy.targetPath) && policy.targetPath.length <= 200 &&
+    typeof policy.beginMarker === "string" && policy.beginMarker.startsWith("# BEGIN ") &&
+    typeof policy.endMarker === "string" && policy.endMarker.startsWith("# END ") &&
+    policy.beginMarker !== policy.endMarker &&
+    Array.isArray(policy.profiles) && policy.profiles.length > 0 && policy.profiles.length <= 8,
+  "Invalid editorconfig policy");
+  const names = new Set(), rules = new Set();
+  for (const profile of policy.profiles) {
+    exactKeys(profile, ["name", "rules"], "Invalid editorconfig profile");
+    requireThat(typeof profile.name === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(profile.name) &&
+      !names.has(profile.name) && Array.isArray(profile.rules) && profile.rules.length > 0 &&
+      profile.rules.length <= 128, "Invalid editorconfig profile");
+    names.add(profile.name);
+    for (const rule of profile.rules) {
+      exactKeys(rule, ["id", "reason"], "Invalid editorconfig rule");
+      requireThat(typeof rule.id === "string" && DIAGNOSTIC.test(rule.id) && !rules.has(rule.id) &&
+        typeof rule.reason === "string" && rule.reason === rule.reason.trim() &&
+        graphemeLength(rule.reason) >= 10 && graphemeLength(rule.reason) <= 240 &&
+        !/[\u0000-\u001f\u007f-\u009f\u2028\u2029\ud800-\udfff\ufffe\uffff]/u.test(rule.reason),
+      "Invalid or duplicate editorconfig rule");
+      rules.add(rule.id);
+    }
+  }
+  return { policy, names, rules };
+}
+
+function policySet(value) {
+  if (value?.checkov || value?.editorconfig) {
+    return {
+      checkov: value.checkov ?? null,
+      editorconfig: value.editorconfig ?? null,
+    };
+  }
+  return { checkov: value, editorconfig: null };
+}
+
+export function validateContract(contract, policyInput) {
+  const policies = policySet(policyInput);
+  const checkov = policies.checkov ? validatePolicy(policies.checkov) : null;
+  const editorconfig = policies.editorconfig ? validateEditorConfigPolicy(policies.editorconfig) : null;
   exactKeys(contract, ["version", "managedFiles"], "Invalid repository standards contract");
   requireThat(contract.version === CONTRACT_VERSION && contract.managedFiles &&
     typeof contract.managedFiles === "object" && !Array.isArray(contract.managedFiles) &&
-    Object.keys(contract.managedFiles).every((key) => key === "checkov"),
+    Object.keys(contract.managedFiles).every((key) => ["checkov", "editorconfig"].includes(key)),
   "Invalid repository standards contract");
   const managedFiles = [];
   if (Object.hasOwn(contract.managedFiles, "checkov")) {
+    requireThat(checkov, "Checkov policy is unavailable");
     const file = contract.managedFiles.checkov;
     exactKeys(file, ["version", "profiles", "exceptions"], "Invalid managed file declaration");
-    requireThat(file.version === policy.version, "Unknown managed file policy version");
+    requireThat(file.version === checkov.policy.version, "Unknown managed file policy version");
     requireThat(Array.isArray(file.profiles) && file.profiles.length > 0 &&
-      file.profiles.length <= policy.profiles.length &&
-      file.profiles.every((name) => typeof name === "string" && catalog.names.has(name)) &&
+      file.profiles.length <= checkov.policy.profiles.length &&
+      file.profiles.every((name) => typeof name === "string" && checkov.names.has(name)) &&
       new Set(file.profiles).size === file.profiles.length, "Unknown or duplicate Checkov profile");
     requireThat(!file.profiles.some((name) => name.endsWith("-resource-scoped") &&
       file.profiles.includes(name.slice(0, -"-resource-scoped".length))),
     "A resource-scoped profile cannot be combined with its repository-wide profile");
     requireThat(Array.isArray(file.exceptions) && file.exceptions.length <= 128,
       "Invalid Checkov exceptions");
-    const selectedRules = new Set(policy.profiles
+    const selectedRules = new Set(checkov.policy.profiles
       .filter((profile) => file.profiles.includes(profile.name))
       .flatMap((profile) => profile.rules));
     const exceptions = new Map();
@@ -90,7 +134,7 @@ export function validateContract(contract, policy) {
       const reasonLength = typeof exception.reason === "string"
         ? graphemeLength(exception.reason)
         : -1;
-      requireThat(typeof exception.rule === "string" && catalog.exceptionRules.has(exception.rule) &&
+      requireThat(typeof exception.rule === "string" && checkov.exceptionRules.has(exception.rule) &&
         !selectedRules.has(exception.rule) && !exceptions.has(exception.rule) &&
         typeof exception.reason === "string" && exception.reason === exception.reason.trim() &&
         reasonLength >= 10 && reasonLength <= 600 &&
@@ -98,8 +142,21 @@ export function validateContract(contract, policy) {
       "Duplicate, unsupported, or malformed Checkov exception");
       exceptions.set(exception.rule, exception.reason);
     }
-    managedFiles.push({ type: "checkov", path: policy.targetPath, policyVersion: file.version,
+    managedFiles.push({ type: "checkov", path: checkov.policy.targetPath, policyVersion: file.version,
       profiles: file.profiles, exceptions });
+  }
+  if (Object.hasOwn(contract.managedFiles, "editorconfig")) {
+    requireThat(editorconfig, "Editorconfig policy is unavailable");
+    const file = contract.managedFiles.editorconfig;
+    exactKeys(file, ["version", "profiles"], "Invalid managed editorconfig declaration");
+    requireThat(file.version === editorconfig.policy.version &&
+      Array.isArray(file.profiles) && file.profiles.length > 0 &&
+      file.profiles.length <= editorconfig.policy.profiles.length &&
+      file.profiles.every((name) => typeof name === "string" && editorconfig.names.has(name)) &&
+      new Set(file.profiles).size === file.profiles.length,
+    "Unknown managed editorconfig policy version or profile");
+    managedFiles.push({ type: "editorconfig", path: editorconfig.policy.targetPath,
+      policyVersion: file.version, profiles: file.profiles });
   }
   return { version: contract.version, managedFiles };
 }
@@ -142,15 +199,88 @@ export function renderCheckov(file, policy) {
   return `${lines.join("\n")}\n`;
 }
 
-export function generateManagedFiles(contract, policy) {
-  const validated = validateContract(contract, policy);
-  return validated.managedFiles.map((file) => ({
-    path: file.path,
-    content: renderCheckov(file, policy),
-  }));
+export function renderEditorConfig(file, policy) {
+  const validated = validateContract({ version: CONTRACT_VERSION, managedFiles: { editorconfig: {
+    version: file.policyVersion ?? file.version,
+    profiles: file.profiles,
+  } } }, { editorconfig: policy }).managedFiles[0];
+  const selected = new Set(validated.profiles);
+  const lines = [
+    policy.beginMarker,
+    "# Managed by platform-devex repository standards. Do not edit this section by hand.",
+    `# Provenance: ${CONTRACT_VERSION} / ${policy.version}`,
+    "[*.{cs,vb}]",
+  ];
+  for (const profile of policy.profiles) {
+    if (!selected.has(profile.name)) continue;
+    lines.push(`# Profile: ${profile.name}`);
+    for (const rule of profile.rules) {
+      lines.push(`# ${rule.reason}`);
+      lines.push(`dotnet_diagnostic.${rule.id}.severity = none`);
+    }
+  }
+  lines.push(policy.endMarker);
+  return `${lines.join("\n")}\n`;
 }
 
-export function validateCatalog(value, policy) {
+export function applyEditorConfig(current, file, policy) {
+  requireThat(current === null || typeof current === "string", "Invalid editorconfig source");
+  const section = renderEditorConfig(file, policy);
+  if (current === null) return `root = true\n\n${section}`;
+  requireThat(!current.includes("\0") && !current.includes("\ufffd") &&
+    !/(^|[^\r])\r(?!\n)/.test(current), "Invalid editorconfig source");
+  const eol = current.includes("\r\n") ? "\r\n" : "\n";
+  const normalized = current.replaceAll("\r\n", "\n");
+  const lines = normalized.split("\n");
+  const begins = lines.reduce((all, line, index) =>
+    line === policy.beginMarker ? [...all, index] : all, []);
+  const ends = lines.reduce((all, line, index) =>
+    line === policy.endMarker ? [...all, index] : all, []);
+  requireThat(begins.length === ends.length && begins.length <= 1 &&
+    (!begins.length || begins[0] < ends[0]), "Malformed managed editorconfig section");
+  const managed = section.trimEnd().split("\n");
+  let result;
+  if (begins.length) {
+    result = [...lines.slice(0, begins[0]), ...managed, ...lines.slice(ends[0] + 1)];
+  } else {
+    const withoutTrailingEmpty = [...lines];
+    while (withoutTrailingEmpty.at(-1) === "") withoutTrailingEmpty.pop();
+    result = [...withoutTrailingEmpty, "", ...managed];
+  }
+  return `${result.join("\n").replace(/\n+$/u, "")}\n`.replaceAll("\n", eol);
+}
+
+function nestedEditorConfigUsesPolicy(path, content, policy) {
+  if (path === policy.targetPath || !path.endsWith(`/${policy.targetPath}`)) return false;
+  return content.includes(policy.beginMarker) || content.includes(policy.endMarker) ||
+    policy.profiles.some((profile) =>
+      profile.rules.some((rule) => content.includes(`dotnet_diagnostic.${rule.id}.severity`)));
+}
+
+export function generateManagedFiles(contract, policyInput, editorConfigs = new Map()) {
+  const policies = policySet(policyInput);
+  const validated = validateContract(contract, policies);
+  const files = [];
+  for (const file of validated.managedFiles) {
+    if (file.type === "checkov") {
+      files.push({ path: file.path, content: renderCheckov(file, policies.checkov) });
+      continue;
+    }
+    const paths = new Set([file.path]);
+    for (const [path, content] of editorConfigs) {
+      requireThat(SAFE_PATH.test(path) && typeof content === "string",
+        "Invalid editorconfig source map");
+      if (nestedEditorConfigUsesPolicy(path, content, policies.editorconfig)) paths.add(path);
+    }
+    for (const path of [...paths].sort()) {
+      files.push({ path, content: applyEditorConfig(editorConfigs.get(path) ?? null,
+        file, policies.editorconfig) });
+    }
+  }
+  return files;
+}
+
+export function validateCatalog(value, policyInput) {
   requireThat(typeof value === "string" && value.length > 0 &&
     Buffer.byteLength(value, "utf8") <= MAX_CATALOG_BYTES,
   "Repository standards catalog is missing or exceeds the byte bound");
@@ -164,7 +294,7 @@ export function validateCatalog(value, policy) {
   const validated = Object.create(null);
   for (const [name, contract] of entries) {
     requireThat(REPOSITORY_NAME.test(name), "Invalid repository standards catalog key");
-    validateContract(contract, policy);
+    validateContract(contract, policyInput);
     validated[name] = contract;
   }
   return validated;
@@ -271,29 +401,39 @@ function pullPayload(files, baseSha) {
     title: "chore: reconcile managed repository standards",
     body: `${MARKER}\n## Managed repository standards\n\n` +
       `Source default-branch revision: \`${baseSha}\`.\n\nManaged files:\n${paths}\n\n` +
-      "The listed files are fully managed and may be replaced by later proposals. " +
+      "The listed files or marked sections are managed and may be updated by later proposals. " +
       "This pull request requires human review; platform-devex never merges it or writes the default branch.\n",
   };
 }
 
 export async function reconcile({ api, repository, bot, policy, contract, dryRun = true }) {
   requireThat(REPOSITORY.test(repository) && BOT.test(bot), "Invalid repository or App identity");
-  validatePolicy(policy);
-  const files = generateManagedFiles(contract, policy);
+  const policies = policySet(policy);
+  const validated = validateContract(contract, policies);
   const meta = await api.get(`/repos/${repository}`);
   requireThat(meta.full_name === repository && meta.archived === false && meta.fork === false &&
     typeof meta.default_branch === "string" && /^[A-Za-z0-9._/-]+$/.test(meta.default_branch),
   "Repository is not applicable");
-  if (!files.length) return { repository, dryRun, status: "skipped-no-managed-files" };
+  if (!validated.managedFiles.length) return { repository, dryRun, status: "skipped-no-managed-files" };
 
   const base = await api.get(refPath(repository, meta.default_branch));
   requireThat(SHA.test(base.object?.sha), "Invalid default branch identity");
   const baseSha = base.object.sha;
   const baseTree = validateTree(await api.get(`/repos/${repository}/git/trees/${baseSha}?recursive=1`));
+  const editorConfigs = new Map();
+  if (validated.managedFiles.some((file) => file.type === "editorconfig")) {
+    for (const entry of baseTree.tree.filter((item) =>
+      item.path === ".editorconfig" || item.path.endsWith("/.editorconfig"))) {
+      editorConfigs.set(entry.path, await readBlob(api, repository, entry));
+    }
+  }
+  const files = generateManagedFiles(contract, policies, editorConfigs);
   const changes = [];
   for (const file of files) {
     const entry = baseTree.tree.find((item) => item.path === file.path);
-    const current = entry ? await readBlob(api, repository, entry) : null;
+    const current = editorConfigs.has(file.path)
+      ? editorConfigs.get(file.path)
+      : entry ? await readBlob(api, repository, entry) : null;
     if (current !== file.content) changes.push(file);
   }
   const result = { repository, baseSha, dryRun, managedFiles: files.map((file) => file.path),
@@ -307,11 +447,11 @@ export async function reconcile({ api, repository, bot, policy, contract, dryRun
   if (pr) {
     requireThat(pr.base.ref === meta.default_branch && pr.head.sha === head.object.sha,
       "Managed-files pull request identity changed");
-    const allowed = new Set(files.map((file) => file.path));
+    const allowed = new Set(changes.map((file) => file.path));
     const diff = await api.get(`/repos/${repository}/compare/${baseSha}...${head.object.sha}`);
     const ancestry = compareAncestry(diff, baseSha);
     result.ancestry = ancestry;
-    requireThat(Array.isArray(diff.files) && diff.files.length <= files.length &&
+    requireThat(Array.isArray(diff.files) && diff.files.length <= changes.length &&
       diff.files.every((file) => allowed.has(file.filename) &&
         ["added", "modified"].includes(file.status) && !file.previous_filename),
     "Existing managed-files pull request contains unowned changes");
@@ -452,7 +592,12 @@ async function boundedJson(response) {
 }
 
 async function loadPolicy() {
-  return JSON.parse(await readFile(new URL("../standards/checkov/v1.json", import.meta.url), "utf8"));
+  return {
+    checkov: JSON.parse(await readFile(
+      new URL("../standards/checkov/v1.json", import.meta.url), "utf8")),
+    editorconfig: JSON.parse(await readFile(
+      new URL("../standards/editorconfig/v1.json", import.meta.url), "utf8")),
+  };
 }
 
 async function main() {

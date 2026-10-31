@@ -1,0 +1,57 @@
+{
+  "version": "dotnet-editorconfig-v1",
+  "targetPath": ".editorconfig",
+  "beginMarker": "# BEGIN platform-devex managed .NET analyzer policy",
+  "endMarker": "# END platform-devex managed .NET analyzer policy",
+  "profiles": [
+    {
+      "name": "curated-low-noise",
+      "rules": [
+        {
+          "id": "CS1591",
+          "reason": "Public XML documentation completeness is not an estate-wide correctness requirement."
+        },
+        {
+          "id": "IDE0058",
+          "reason": "Expression-value simplification is optional style; compiler correctness diagnostics remain enabled."
+        },
+        {
+          "id": "IDE0022",
+          "reason": "Expression-bodied member selection is a formatting preference rather than a correctness control."
+        },
+        {
+          "id": "CA2007",
+          "reason": "ConfigureAwait is not required for the estate's application and test workloads."
+        },
+        {
+          "id": "CA1848",
+          "reason": "Source-generated logging is an optional micro-optimisation for these personal projects."
+        },
+        {
+          "id": "IDE0130",
+          "reason": "Namespace-to-folder alignment is a repository layout preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0161",
+          "reason": "File-scoped namespace selection is a formatting preference rather than a correctness control."
+        },
+        {
+          "id": "CA1873",
+          "reason": "Logging argument evaluation is an optional performance optimisation for these workloads."
+        },
+        {
+          "id": "IDE0046",
+          "reason": "Conditional-expression selection is a readability preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0290",
+          "reason": "Primary-constructor adoption is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0300",
+          "reason": "Collection-expression adoption is a modernisation preference rather than a correctness control."
+        }
+      ]
+    }
+  ]
+}

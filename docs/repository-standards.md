@@ -34,6 +34,10 @@ The catalog is an exact JSON object mapping repository names to contracts:
             "reason": "The generated OpenAPI document cannot express this reviewed constraint."
           }
         ]
+      },
+      "editorconfig": {
+        "version": "dotnet-editorconfig-v1",
+        "profiles": ["curated-low-noise"]
       }
     }
   }
@@ -42,10 +46,10 @@ The catalog is an exact JSON object mapping repository names to contracts:
 
 The catalog is bounded to 48 KiB and 256 entries. Every key must be a valid repository name and
 every value must pass the existing strict `repository-standards-v1` contract and policy
-validation. `managedFiles` has exact keys and may be `{}` to declare no managed files. The
-Checkov target path and file type are controller-owned: repositories cannot select a path or
-generator. Unknown contract or policy versions, unknown or duplicate profiles, extra keys,
-malformed exceptions and unsafe canonical policy paths fail closed.
+validation. `managedFiles` has exact `checkov` and `editorconfig` keys and may be `{}` to
+declare no managed files. Target paths and file types are controller-owned: repositories
+cannot select a path or generator. Unknown contract or policy versions, unknown or duplicate
+profiles, extra keys, malformed exceptions and unsafe canonical policy paths fail closed.
 
 The canonical `checkov-v1` policy is `standards/checkov/v1.json`. Profiles contribute ordered,
 deduplicated `skip-check` entries. Repository-specific exceptions may use only the separately
@@ -66,13 +70,27 @@ global suppression must be justified only on the exceptional Terraform resource:
 FC1 plan or Baremetal's workload secret vaults. Other plans and management/runtime vaults
 remain checked. These controls are not added to the repository-global exception allowlist.
 
+The canonical `dotnet-editorconfig-v1` policy is `standards/editorconfig/v1.json`. Its
+`curated-low-noise` profile suppresses exactly the reviewed high-volume documentation,
+code-style, ConfigureAwait and logging micro-optimisation diagnostics. It does not suppress
+nullability, compiler correctness, resource usage, cancellation, test, reliability or security
+diagnostics. Each downgrade carries a canonical reason in the generated section.
+
+The repository root `.editorconfig` is created when absent. Otherwise the controller appends or
+replaces only the exact section between its `BEGIN` and `END` markers, preserving all
+repository-owned content. Existing nested `.editorconfig` files are also updated only when they
+already contain a managed marker or explicitly set one of the managed diagnostics; generated-code
+only nested configurations remain untouched. Missing, duplicated or unbalanced markers fail
+closed rather than replacing ambiguous content.
+
 ## Pull-request reconciliation
 
 Each matrix contract is immutable trusted workflow input from the validated catalog; reconcile
 does not call the target Actions Variables API and does not re-read the contract. A declared
 `{ "managedFiles": {} }` is an explicit skip. Drift is proposed only on
 `automation/repository-standards` through an App-owned pull request. The managed target is fully
-replaced in that proposal. Before every write, the controller rechecks repository identity,
+replaced for whole-file policies; marked editorconfig sections preserve content outside their
+markers. Before every write, the controller rechecks repository identity,
 default branch and source revision, branch identity, pull-request ownership and current head. It
 refuses human branches or pull requests, never writes a target default branch, and never merges
 or enables auto-merge.
