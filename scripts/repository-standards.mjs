@@ -406,7 +406,15 @@ function pullPayload(files, baseSha) {
   };
 }
 
-export async function reconcile({ api, repository, bot, policy, contract, dryRun = true }) {
+export async function reconcile({
+  api,
+  repository,
+  bot,
+  policy,
+  contract,
+  dryRun = true,
+  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+}) {
   requireThat(REPOSITORY.test(repository) && BOT.test(bot), "Invalid repository or App identity");
   const policies = policySet(policy);
   const validated = validateContract(contract, policies);
@@ -486,11 +494,23 @@ export async function reconcile({ api, repository, bot, policy, contract, dryRun
     const currentPulls = await openPulls(api, repository);
     const currentPr = ownedPull(currentPulls, repository, bot);
     requireThat(Boolean(currentPr) === Boolean(pr) && (!pr ||
-      currentPr.number === pr.number && currentPr.head.sha === expectedHead &&
-      currentPr.base.ref === meta.default_branch), "Managed-files pull request changed");
+      currentPr.number === pr.number && currentPr.base.ref === meta.default_branch),
+    "Managed-files pull request changed");
+    requireThat(!pr || currentPr.head.sha === expectedHead,
+      "Managed-files pull request head has not propagated");
     const currentHead = await optionalGet(api, refPath(repository, BRANCH));
     requireThat((currentHead?.object.sha ?? null) === expectedHead,
       "Managed-files branch source changed");
+  };
+  const recheckPublishedCommit = async (expectedHead) => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        return await recheck(expectedHead);
+      } catch (error) {
+        if (error.message !== "Managed-files pull request head has not propagated" || attempt === 4) throw error;
+        await wait(1000 * (attempt + 1));
+      }
+    }
   };
 
   let newSha = head?.object.sha ?? null;
@@ -518,7 +538,7 @@ export async function reconcile({ api, repository, bot, policy, contract, dryRun
     newSha = committed.createCommitOnBranch?.commit?.oid;
     requireThat(SHA.test(newSha), "Managed commit creation returned no identity");
   }
-  await recheck(newSha);
+  await recheckPublishedCommit(newSha);
   const published = pr
     ? await api.patch(`/repos/${repository}/pulls/${pr.number}`, payload)
     : await api.post(`/repos/${repository}/pulls`, {

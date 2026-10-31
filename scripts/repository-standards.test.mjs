@@ -494,6 +494,25 @@ test("updates only an App-owned branch and pull request", async () => {
   ]);
 });
 
+test("retries a transient pull request head lag after publishing a managed commit", async () => {
+  const f = fixture({ current: "old\n", head: oldHeadSha, pull: true });
+  f.state.headContent = "older proposal\n";
+  f.state.onCommit = () => {
+    f.state.pull = f.makePull();
+    f.state.pull.head.sha = oldHeadSha;
+  };
+  f.state.onPullsRead = () => {
+    if (f.state.pullsReads === 5) f.state.pull = f.makePull();
+  };
+  const waits = [];
+  const result = await run(f, {
+    dryRun: false,
+    wait: async (milliseconds) => waits.push(milliseconds),
+  });
+  assert.equal(result.status, "updated");
+  assert.deepEqual(waits, [1000]);
+});
+
 test("refreshes metadata without another commit when owned branch content is exact", async () => {
   const f = fixture({ current: "old\n", head: oldHeadSha, pull: true });
   f.state.headContent = f.expected;
