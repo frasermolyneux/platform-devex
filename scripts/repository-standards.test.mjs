@@ -271,7 +271,7 @@ test("canonical editorconfig policy suppresses only the approved low-noise diagn
       "IDE0004", "IDE0007", "IDE0010", "IDE0017", "IDE0018", "IDE0019", "IDE0021",
       "IDE0028", "IDE0031", "IDE0032", "IDE0037", "IDE0039", "IDE0040", "IDE0042",
       "IDE0044", "IDE0045", "IDE0047", "IDE0048", "IDE0051", "IDE0052", "IDE0059",
-      "IDE0060", "IDE0061", "IDE0063", "IDE0078", "IDE0090", "IDE0100", "IDE0200",
+      "IDE0060", "IDE0061", "IDE0063", "IDE0072", "IDE0078", "IDE0090", "IDE0100", "IDE0200",
       "IDE0240", "IDE0270", "IDE0301", "IDE0305", "IDE0306", "IDE0330", "IDE0350",
       "IDE0390", "IDE1006",
     ]);
@@ -284,6 +284,7 @@ test("canonical Sonar and ESLint policies retain actionable findings and exclude
   validateEslintPolicy(eslintPolicy);
   const ignored = sonarPolicy.profiles[0].ignoredRules.map((rule) => rule.key);
   assert.ok(ignored.includes("csharpsquid:S2699"));
+  assert.ok(ignored.includes("external_roslyn:CA2016"));
   assert.ok(ignored.includes("javascript:S3776"));
   assert.ok(ignored.includes("Web:S6853"));
   assert.ok(!ignored.includes("csharpsquid:S6640"));
@@ -347,6 +348,10 @@ test("renders and replaces a bounded managed editorconfig section without changi
     assert.match(section, /repository-standards-v1 \/ dotnet-editorconfig-v1/);
     assert.match(section, /dotnet_diagnostic\.CS1591\.severity = none/);
     assert.doesNotMatch(section, /CA2016|CS8602|xUnit/);
+    const actionableSection = renderEditorConfig(
+      editorContract({ profiles: ["curated-low-noise", "actionable-only"] }).managedFiles.editorconfig,
+      editorPolicy);
+    assert.match(actionableSection, /dotnet_diagnostic\.IDE0072\.severity = none/);
 
     const source = "root = true\n\n[*.cs]\nindent_size = 4\n";
     const appended = applyEditorConfig(source, declared, editorPolicy);

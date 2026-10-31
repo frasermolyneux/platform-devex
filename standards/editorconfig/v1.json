@@ -313,6 +313,10 @@
           "reason": "Using statement syntax is a style preference rather than a correctness control."
         },
         {
+          "id": "IDE0072",
+          "reason": "Missing switch-case population is deferred when compiler exhaustiveness and application correctness checks already pass."
+        },
+        {
           "id": "IDE0078",
           "reason": "Pattern matching simplification is a modernisation preference rather than a correctness control."
         },

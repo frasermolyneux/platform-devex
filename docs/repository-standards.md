@@ -104,10 +104,13 @@ closed rather than replacing ambiguous content.
 The canonical `sonar-policy-v1` policy is `standards/sonar/v1.json` and renders the whole
 `.sonarcloud.json` file. Its `actionable-only` profile suppresses reviewed maintainability,
 style, test-heuristic and micro-performance rules. Accessibility heuristics are temporarily
-staged out and explicitly documented for progressive re-enablement. Security, vulnerability,
-reliability, cancellation, nullability, unsafe-code, CSRF, regular-expression backtracking,
-workflow-security and infrastructure rules are not suppressed. `common-vendor-assets` excludes
-only package, vendor, `wwwroot/lib` and minified distribution paths.
+staged out and explicitly documented for progressive re-enablement. Imported Roslyn `CA2016`
+is also hidden in Sonar because the retained native `S8949` rule reports the same
+cancellation-token forwarding locations; the compiler diagnostic remains enabled outside
+Sonar. Security, vulnerability, reliability, native cancellation, nullability, unsafe-code,
+CSRF, regular-expression backtracking, workflow-security and infrastructure rules are not
+suppressed. `common-vendor-assets` excludes only package, vendor, `wwwroot/lib` and minified
+distribution paths.
 
 Repository-specific Sonar exclusions remain workload declarations. Each exclusion requires a
 single safe relative glob and a reviewed 10–240 grapheme reason; commas, whitespace,
