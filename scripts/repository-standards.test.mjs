@@ -12,11 +12,15 @@ import {
   isIncompleteStatus,
   reconcile,
   renderCheckov,
+  renderEslint,
   renderEditorConfig,
+  renderSonar,
   validateCatalog,
   validateContract,
+  validateEslintPolicy,
   validateEditorConfigPolicy,
   validatePolicy,
+  validateSonarPolicy,
 } from "./repository-standards.mjs";
 
 const repository = "owner/target";
@@ -29,7 +33,11 @@ const generatedBlobSha = "e".repeat(40);
 const policy = JSON.parse(await readFile(new URL("../standards/checkov/v1.json", import.meta.url), "utf8"));
 const editorPolicy = JSON.parse(await readFile(
   new URL("../standards/editorconfig/v1.json", import.meta.url), "utf8"));
-const policies = { checkov: policy, editorconfig: editorPolicy };
+const sonarPolicy = JSON.parse(await readFile(
+  new URL("../standards/sonar/v1.json", import.meta.url), "utf8"));
+const eslintPolicy = JSON.parse(await readFile(
+  new URL("../standards/eslint/v1.json", import.meta.url), "utf8"));
+const policies = { checkov: policy, editorconfig: editorPolicy, sonar: sonarPolicy, eslint: eslintPolicy };
 
 function contract(overrides = {}) {
   return {
@@ -55,6 +63,33 @@ function editorContract(overrides = {}) {
       editorconfig: {
         version: "dotnet-editorconfig-v1",
         profiles: ["curated-low-noise"],
+        ...overrides,
+      },
+    },
+  };
+}
+
+function sonarContract(overrides = {}) {
+  return {
+    version: CONTRACT_VERSION,
+    managedFiles: {
+      sonar: {
+        version: "sonar-policy-v1",
+        profiles: ["actionable-only", "common-vendor-assets"],
+        exclusions: [],
+        ...overrides,
+      },
+    },
+  };
+}
+
+function eslintContract(overrides = {}) {
+  return {
+    version: CONTRACT_VERSION,
+    managedFiles: {
+      eslint: {
+        version: "eslint-ignore-v1",
+        profiles: ["common-vendor-assets"],
         ...overrides,
       },
     },
@@ -211,7 +246,8 @@ test("canonical policy contains the approved profiles and exact ordered rules", 
 test("canonical editorconfig policy suppresses only the approved low-noise diagnostics", () => {
     validateEditorConfigPolicy(editorPolicy);
     assert.equal(editorPolicy.version, "dotnet-editorconfig-v1");
-    assert.deepEqual(editorPolicy.profiles.map((profile) => profile.name), ["curated-low-noise"]);
+    assert.deepEqual(editorPolicy.profiles.map((profile) => profile.name),
+      ["curated-low-noise", "actionable-only"]);
     assert.deepEqual(editorPolicy.profiles[0].rules.map((rule) => rule.id), [
       "CS1591",
       "IDE0058",
@@ -226,7 +262,82 @@ test("canonical editorconfig policy suppresses only the approved low-noise diagn
       "IDE0300",
       "IDE0370",
     ]);
+    assert.deepEqual(editorPolicy.profiles[1].rules.map((rule) => rule.id), [
+      "CS0419", "CS1570", "CS1573", "CA1051", "CA1068", "CA1304", "CA1305", "CA1310",
+      "CA1311", "CA1510", "CA1512", "CA1707", "CA1711", "CA1716", "CA1720", "CA1727",
+      "CA1805", "CA1822", "CA1825", "CA1826", "CA1829", "CA1841", "CA1847", "CA1850",
+      "CA1852", "CA1854", "CA1859", "CA1860", "CA1861", "CA1862", "CA1864", "CA1865",
+      "CA1866", "CA1869", "CA2249", "SYSLIB1044", "SYSLIB1045", "xUnit2032", "AV0025",
+      "IDE0004", "IDE0007", "IDE0010", "IDE0017", "IDE0018", "IDE0019", "IDE0021",
+      "IDE0028", "IDE0031", "IDE0032", "IDE0037", "IDE0039", "IDE0040", "IDE0042",
+      "IDE0044", "IDE0045", "IDE0047", "IDE0048", "IDE0051", "IDE0052", "IDE0059",
+      "IDE0060", "IDE0061", "IDE0063", "IDE0078", "IDE0090", "IDE0100", "IDE0200",
+      "IDE0240", "IDE0270", "IDE0301", "IDE0305", "IDE0306", "IDE0330", "IDE0350",
+      "IDE0390", "IDE1006",
+    ]);
     assert.ok(editorPolicy.profiles[0].rules.every((rule) => rule.reason.length >= 10));
+    assert.ok(editorPolicy.profiles[1].rules.every((rule) => rule.reason.length >= 10));
+});
+
+test("canonical Sonar and ESLint policies retain actionable findings and exclude only approved noise", () => {
+  validateSonarPolicy(sonarPolicy);
+  validateEslintPolicy(eslintPolicy);
+  const ignored = sonarPolicy.profiles[0].ignoredRules.map((rule) => rule.key);
+  assert.ok(ignored.includes("csharpsquid:S2699"));
+  assert.ok(ignored.includes("javascript:S3776"));
+  assert.ok(ignored.includes("Web:S6853"));
+  assert.ok(!ignored.includes("csharpsquid:S6640"));
+  assert.ok(!ignored.includes("javascript:S8786"));
+  assert.ok(!ignored.includes("csharpsquid:S8949"));
+  assert.deepEqual(sonarPolicy.profiles[1].exclusions.map((entry) => entry.pattern), [
+    "**/node_modules/**", "**/vendor/**", "**/wwwroot/lib/**", "**/*.min.js", "**/*.min.css",
+  ]);
+  assert.deepEqual(eslintPolicy.profiles[0].exclusions.map((entry) => entry.pattern), [
+    "**/node_modules/**", "**/vendor/**", "**/wwwroot/lib/**", "**/*.min.js",
+  ]);
+});
+
+test("renders deterministic managed Sonar and ESLint files with targeted exclusions", () => {
+  const sonar = renderSonar(sonarContract({
+    exclusions: [{
+      pattern: "Web/wwwroot/less/**",
+      reason: "The reviewed path contains third-party source assets retained for the application build.",
+    }],
+  }).managedFiles.sonar, sonarPolicy);
+  const parsed = JSON.parse(sonar);
+  assert.deepEqual(Object.keys(parsed), [
+    "version", "provenance", "profiles", "ignoredRules", "exclusions",
+  ]);
+  assert.equal(parsed.version, "sonar-policy-v1");
+  assert.equal(parsed.ignoredRules.at(-1).key, "Web:S6853");
+  assert.equal(parsed.exclusions.at(-1).pattern, "Web/wwwroot/less/**");
+  assert.equal(sonar, renderSonar(sonarContract({
+    exclusions: [{
+      pattern: "Web/wwwroot/less/**",
+      reason: "The reviewed path contains third-party source assets retained for the application build.",
+    }],
+  }).managedFiles.sonar, sonarPolicy));
+
+  const eslint = renderEslint(eslintContract().managedFiles.eslint, eslintPolicy);
+  assert.match(eslint, /repository-standards-v1 \/ eslint-ignore-v1/);
+  assert.match(eslint, /\*\*\/wwwroot\/lib\/\*\*/);
+  assert.equal(generateManagedFiles(sonarContract(), policies)[0].path, ".sonarcloud.json");
+  assert.equal(generateManagedFiles(eslintContract(), policies)[0].content, eslint);
+});
+
+test("Sonar and ESLint contracts reject unknown profiles and unsafe exclusions", () => {
+  assert.throws(() => validateContract(sonarContract({ profiles: ["unknown"] }), policies),
+    /version or profile/);
+  assert.throws(() => validateContract(sonarContract({ exclusions: [{
+    pattern: "../src/**",
+    reason: "This unsafe traversal must be rejected by the managed policy contract.",
+  }] }), policies), /exclusion/);
+  assert.throws(() => validateContract(sonarContract({ exclusions: [{
+    pattern: "src/**,**/*",
+    reason: "Comma-separated scanner argument injection must be rejected by the policy contract.",
+  }] }), policies), /exclusion/);
+  assert.throws(() => validateContract(eslintContract({ profiles: ["unknown"] }), policies),
+    /version or profile/);
 });
 
 test("renders and replaces a bounded managed editorconfig section without changing repository content", () => {

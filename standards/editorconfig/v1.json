@@ -56,6 +56,315 @@
           "reason": "Redundant suppression cleanup is low-value churn when the centrally managed policy changes diagnostic severity."
         }
       ]
+    },
+    {
+      "name": "actionable-only",
+      "rules": [
+        {
+          "id": "CS0419",
+          "reason": "XML documentation reference precision is deferred from the initial actionable-only baseline."
+        },
+        {
+          "id": "CS1570",
+          "reason": "XML documentation formatting is deferred from the initial actionable-only baseline."
+        },
+        {
+          "id": "CS1573",
+          "reason": "XML parameter documentation completeness is deferred from the initial actionable-only baseline."
+        },
+        {
+          "id": "CA1051",
+          "reason": "Public field design is an API convention rather than an estate-wide correctness requirement."
+        },
+        {
+          "id": "CA1068",
+          "reason": "Cancellation-token parameter ordering is an API convention rather than a correctness defect."
+        },
+        {
+          "id": "CA1304",
+          "reason": "Explicit culture selection is deferred unless a concrete globalization defect is identified."
+        },
+        {
+          "id": "CA1305",
+          "reason": "Explicit format-provider selection is deferred unless a concrete globalization defect is identified."
+        },
+        {
+          "id": "CA1310",
+          "reason": "String-comparison overload preference is deferred unless a concrete correctness defect is identified."
+        },
+        {
+          "id": "CA1311",
+          "reason": "Culture specification is deferred unless a concrete globalization defect is identified."
+        },
+        {
+          "id": "CA1510",
+          "reason": "ArgumentNullException helper adoption is a modernisation preference rather than a correctness defect."
+        },
+        {
+          "id": "CA1512",
+          "reason": "Exception helper adoption is a modernisation preference rather than a correctness defect."
+        },
+        {
+          "id": "CA1707",
+          "reason": "Identifier underscore restrictions are naming conventions rather than correctness controls."
+        },
+        {
+          "id": "CA1711",
+          "reason": "Type suffix restrictions are naming conventions rather than correctness controls."
+        },
+        {
+          "id": "CA1716",
+          "reason": "Keyword identifier restrictions are naming conventions rather than correctness controls."
+        },
+        {
+          "id": "CA1720",
+          "reason": "Primitive type name restrictions are naming conventions rather than correctness controls."
+        },
+        {
+          "id": "CA1727",
+          "reason": "Event-handler naming is a convention rather than an estate-wide correctness requirement."
+        },
+        {
+          "id": "CA1805",
+          "reason": "Default value initialization cleanup is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1822",
+          "reason": "Static member conversion is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1825",
+          "reason": "Empty array allocation cleanup is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1826",
+          "reason": "Index access replacement is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1829",
+          "reason": "Length property selection is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1841",
+          "reason": "Dictionary key lookup selection is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1847",
+          "reason": "Character literal selection is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1850",
+          "reason": "Hash computation API selection is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1852",
+          "reason": "Internal type sealing is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1854",
+          "reason": "Dictionary access consolidation is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1859",
+          "reason": "Concrete type selection is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1860",
+          "reason": "Count comparison replacement is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1861",
+          "reason": "Constant array reuse is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1862",
+          "reason": "String comparison allocation reduction is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1864",
+          "reason": "Dictionary insertion consolidation is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1865",
+          "reason": "String API overload selection is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1866",
+          "reason": "Character overload selection is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA1869",
+          "reason": "JsonSerializerOptions caching is a micro-optimisation deferred from the initial baseline."
+        },
+        {
+          "id": "CA2249",
+          "reason": "String contains API adoption is a modernisation preference rather than a correctness defect."
+        },
+        {
+          "id": "SYSLIB1044",
+          "reason": "Source-generated regular-expression adoption is a performance modernisation deferred from the initial baseline."
+        },
+        {
+          "id": "SYSLIB1045",
+          "reason": "Source-generated regular-expression adoption is a performance modernisation deferred from the initial baseline."
+        },
+        {
+          "id": "xUnit2032",
+          "reason": "Assertion API preference is deferred while functional test failures and correctness findings remain visible."
+        },
+        {
+          "id": "AV0025",
+          "reason": "Analyzer-specific style guidance is deferred from the initial actionable-only baseline."
+        },
+        {
+          "id": "IDE0004",
+          "reason": "Cast simplification is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0007",
+          "reason": "Explicit type selection is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0010",
+          "reason": "Pattern matching simplification is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0017",
+          "reason": "Object initialization syntax is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0018",
+          "reason": "Inline variable declaration is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0019",
+          "reason": "Pattern matching syntax is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0021",
+          "reason": "Expression-bodied constructor selection is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0028",
+          "reason": "Collection initialization syntax is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0031",
+          "reason": "Null propagation syntax is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0032",
+          "reason": "Auto-property selection is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0037",
+          "reason": "Inferred member naming is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0039",
+          "reason": "Local function selection is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0040",
+          "reason": "Accessibility modifier declaration is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0042",
+          "reason": "Deconstruction syntax is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0044",
+          "reason": "Readonly field conversion is a maintainability preference deferred from the initial baseline."
+        },
+        {
+          "id": "IDE0045",
+          "reason": "Conditional expression syntax is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0047",
+          "reason": "Parenthesis preference is formatting rather than a correctness control."
+        },
+        {
+          "id": "IDE0048",
+          "reason": "Parenthesis preference is formatting rather than a correctness control."
+        },
+        {
+          "id": "IDE0051",
+          "reason": "Unused private member cleanup is deferred as maintainability work in the initial baseline."
+        },
+        {
+          "id": "IDE0052",
+          "reason": "Unread private member cleanup is deferred as maintainability work in the initial baseline."
+        },
+        {
+          "id": "IDE0059",
+          "reason": "Unnecessary assignment cleanup is deferred as maintainability work in the initial baseline."
+        },
+        {
+          "id": "IDE0060",
+          "reason": "Unused parameter cleanup is deferred as maintainability work in the initial baseline."
+        },
+        {
+          "id": "IDE0061",
+          "reason": "Array element access simplification is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0063",
+          "reason": "Using statement syntax is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0078",
+          "reason": "Pattern matching simplification is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0090",
+          "reason": "Target-typed construction is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0100",
+          "reason": "Lambda simplification is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0200",
+          "reason": "Lambda expression removal is a style preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0240",
+          "reason": "Null check simplification is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0270",
+          "reason": "Null check syntax is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0301",
+          "reason": "Collection expression adoption is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0305",
+          "reason": "Collection expression adoption is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0306",
+          "reason": "Collection expression adoption is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0330",
+          "reason": "System.Threading.Lock adoption is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0350",
+          "reason": "Implicit object creation is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE0390",
+          "reason": "Unbound generic type use is a modernisation preference rather than a correctness control."
+        },
+        {
+          "id": "IDE1006",
+          "reason": "Naming style enforcement is deferred from the initial actionable-only baseline."
+        }
+      ]
     }
   ]
 }

@@ -9,8 +9,10 @@ const REPOSITORY_NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const BOT = /^[A-Za-z0-9_-]+\[bot\]$/;
 const SHA = /^[a-f0-9]{40}$/;
 const RULE = /^CKV(?:2)?_[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
-const DIAGNOSTIC = /^(?:CA|CS|IDE)[0-9]{4}$/;
+const DIAGNOSTIC = /^(?:(?:CA|CS|IDE|ASP|AV)[0-9]{4}|SYSLIB[0-9]{4}|xUnit[0-9]{4})$/;
+const SONAR_RULE = /^[A-Za-z][A-Za-z0-9_.-]*:[A-Za-z0-9_.-]+$/;
 const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._/-]+$/;
+const SAFE_GLOB = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*[,\\\s])[A-Za-z0-9._/*?-]+$/;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_CATALOG_BYTES = 48 * 1024;
 const MAX_CATALOG_ENTRIES = 256;
@@ -91,24 +93,90 @@ export function validateEditorConfigPolicy(policy) {
   return { policy, names, rules };
 }
 
+function validReason(reason, maximum = 600) {
+  return typeof reason === "string" && reason === reason.trim() &&
+    graphemeLength(reason) >= 10 && graphemeLength(reason) <= maximum &&
+    !/[\u0000-\u001f\u007f-\u009f\u2028\u2029\ud800-\udfff\ufffe\uffff]/u.test(reason);
+}
+
+function validateExclusion(exclusion, message) {
+  exactKeys(exclusion, ["pattern", "reason"], message);
+  requireThat(typeof exclusion.pattern === "string" && exclusion.pattern.length <= 240 &&
+    SAFE_GLOB.test(exclusion.pattern) && validReason(exclusion.reason, 240), message);
+}
+
+export function validateSonarPolicy(policy) {
+  exactKeys(policy, ["version", "targetPath", "profiles"], "Invalid Sonar policy");
+  requireThat(policy.version === "sonar-policy-v1" && policy.targetPath === ".sonarcloud.json" &&
+    SAFE_PATH.test(policy.targetPath) && Array.isArray(policy.profiles) &&
+    policy.profiles.length > 0 && policy.profiles.length <= 8, "Invalid Sonar policy");
+  const names = new Set(), rules = new Set(), patterns = new Set();
+  for (const profile of policy.profiles) {
+    exactKeys(profile, ["name", "ignoredRules", "exclusions"], "Invalid Sonar profile");
+    requireThat(typeof profile.name === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(profile.name) &&
+      !names.has(profile.name) && Array.isArray(profile.ignoredRules) &&
+      profile.ignoredRules.length <= 128 && Array.isArray(profile.exclusions) &&
+      profile.exclusions.length <= 64, "Invalid Sonar profile");
+    names.add(profile.name);
+    for (const rule of profile.ignoredRules) {
+      exactKeys(rule, ["key", "reason"], "Invalid Sonar ignored rule");
+      requireThat(typeof rule.key === "string" && SONAR_RULE.test(rule.key) && !rules.has(rule.key) &&
+        validReason(rule.reason, 240), "Invalid or duplicate Sonar ignored rule");
+      rules.add(rule.key);
+    }
+    for (const exclusion of profile.exclusions) {
+      validateExclusion(exclusion, "Invalid Sonar exclusion");
+      requireThat(!patterns.has(exclusion.pattern), "Invalid or duplicate Sonar exclusion");
+      patterns.add(exclusion.pattern);
+    }
+  }
+  return { policy, names };
+}
+
+export function validateEslintPolicy(policy) {
+  exactKeys(policy, ["version", "targetPath", "profiles"], "Invalid ESLint policy");
+  requireThat(policy.version === "eslint-ignore-v1" && policy.targetPath === ".eslintignore" &&
+    SAFE_PATH.test(policy.targetPath) && Array.isArray(policy.profiles) &&
+    policy.profiles.length > 0 && policy.profiles.length <= 8, "Invalid ESLint policy");
+  const names = new Set(), patterns = new Set();
+  for (const profile of policy.profiles) {
+    exactKeys(profile, ["name", "exclusions"], "Invalid ESLint profile");
+    requireThat(typeof profile.name === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(profile.name) &&
+      !names.has(profile.name) && Array.isArray(profile.exclusions) &&
+      profile.exclusions.length > 0 && profile.exclusions.length <= 64, "Invalid ESLint profile");
+    names.add(profile.name);
+    for (const exclusion of profile.exclusions) {
+      validateExclusion(exclusion, "Invalid ESLint exclusion");
+      requireThat(!patterns.has(exclusion.pattern), "Invalid or duplicate ESLint exclusion");
+      patterns.add(exclusion.pattern);
+    }
+  }
+  return { policy, names };
+}
+
 function policySet(value) {
-  if (value?.checkov || value?.editorconfig) {
+  if (value?.checkov || value?.editorconfig || value?.sonar || value?.eslint) {
     return {
       checkov: value.checkov ?? null,
       editorconfig: value.editorconfig ?? null,
+      sonar: value.sonar ?? null,
+      eslint: value.eslint ?? null,
     };
   }
-  return { checkov: value, editorconfig: null };
+  return { checkov: value, editorconfig: null, sonar: null, eslint: null };
 }
 
 export function validateContract(contract, policyInput) {
   const policies = policySet(policyInput);
   const checkov = policies.checkov ? validatePolicy(policies.checkov) : null;
   const editorconfig = policies.editorconfig ? validateEditorConfigPolicy(policies.editorconfig) : null;
+  const sonar = policies.sonar ? validateSonarPolicy(policies.sonar) : null;
+  const eslint = policies.eslint ? validateEslintPolicy(policies.eslint) : null;
   exactKeys(contract, ["version", "managedFiles"], "Invalid repository standards contract");
   requireThat(contract.version === CONTRACT_VERSION && contract.managedFiles &&
     typeof contract.managedFiles === "object" && !Array.isArray(contract.managedFiles) &&
-    Object.keys(contract.managedFiles).every((key) => ["checkov", "editorconfig"].includes(key)),
+    Object.keys(contract.managedFiles).every((key) =>
+      ["checkov", "editorconfig", "sonar", "eslint"].includes(key)),
   "Invalid repository standards contract");
   const managedFiles = [];
   if (Object.hasOwn(contract.managedFiles, "checkov")) {
@@ -156,6 +224,37 @@ export function validateContract(contract, policyInput) {
       new Set(file.profiles).size === file.profiles.length,
     "Unknown managed editorconfig policy version or profile");
     managedFiles.push({ type: "editorconfig", path: editorconfig.policy.targetPath,
+      policyVersion: file.version, profiles: file.profiles });
+  }
+  if (Object.hasOwn(contract.managedFiles, "sonar")) {
+    requireThat(sonar, "Sonar policy is unavailable");
+    const file = contract.managedFiles.sonar;
+    exactKeys(file, ["version", "profiles", "exclusions"], "Invalid managed Sonar declaration");
+    requireThat(file.version === sonar.policy.version && Array.isArray(file.profiles) &&
+      file.profiles.length > 0 && file.profiles.length <= sonar.policy.profiles.length &&
+      file.profiles.every((name) => typeof name === "string" && sonar.names.has(name)) &&
+      new Set(file.profiles).size === file.profiles.length &&
+      Array.isArray(file.exclusions) && file.exclusions.length <= 64,
+    "Unknown managed Sonar policy version or profile");
+    const patterns = new Set();
+    for (const exclusion of file.exclusions) {
+      validateExclusion(exclusion, "Invalid managed Sonar exclusion");
+      requireThat(!patterns.has(exclusion.pattern), "Duplicate managed Sonar exclusion");
+      patterns.add(exclusion.pattern);
+    }
+    managedFiles.push({ type: "sonar", path: sonar.policy.targetPath,
+      policyVersion: file.version, profiles: file.profiles, exclusions: file.exclusions });
+  }
+  if (Object.hasOwn(contract.managedFiles, "eslint")) {
+    requireThat(eslint, "ESLint policy is unavailable");
+    const file = contract.managedFiles.eslint;
+    exactKeys(file, ["version", "profiles"], "Invalid managed ESLint declaration");
+    requireThat(file.version === eslint.policy.version && Array.isArray(file.profiles) &&
+      file.profiles.length > 0 && file.profiles.length <= eslint.policy.profiles.length &&
+      file.profiles.every((name) => typeof name === "string" && eslint.names.has(name)) &&
+      new Set(file.profiles).size === file.profiles.length,
+    "Unknown managed ESLint policy version or profile");
+    managedFiles.push({ type: "eslint", path: eslint.policy.targetPath,
       policyVersion: file.version, profiles: file.profiles });
   }
   return { version: contract.version, managedFiles };
@@ -223,6 +322,60 @@ export function renderEditorConfig(file, policy) {
   return `${lines.join("\n")}\n`;
 }
 
+export function renderSonar(file, policy) {
+  const validated = validateContract({ version: CONTRACT_VERSION, managedFiles: { sonar: {
+    version: file.policyVersion ?? file.version,
+    profiles: file.profiles,
+    exclusions: file.exclusions,
+  } } }, { sonar: policy }).managedFiles[0];
+  const selected = new Set(validated.profiles);
+  const ignoredRules = [], exclusions = [];
+  const ruleKeys = new Set(), patterns = new Set();
+  for (const profile of policy.profiles) {
+    if (!selected.has(profile.name)) continue;
+    for (const rule of profile.ignoredRules) {
+      if (!ruleKeys.has(rule.key)) ignoredRules.push(rule);
+      ruleKeys.add(rule.key);
+    }
+    for (const exclusion of profile.exclusions) {
+      if (!patterns.has(exclusion.pattern)) exclusions.push(exclusion);
+      patterns.add(exclusion.pattern);
+    }
+  }
+  for (const exclusion of validated.exclusions) {
+    if (!patterns.has(exclusion.pattern)) exclusions.push(exclusion);
+    patterns.add(exclusion.pattern);
+  }
+  return `${JSON.stringify({
+    version: policy.version,
+    provenance: CONTRACT_VERSION,
+    profiles: validated.profiles,
+    ignoredRules,
+    exclusions,
+  }, null, 2)}\n`;
+}
+
+export function renderEslint(file, policy) {
+  const validated = validateContract({ version: CONTRACT_VERSION, managedFiles: { eslint: {
+    version: file.policyVersion ?? file.version,
+    profiles: file.profiles,
+  } } }, { eslint: policy }).managedFiles[0];
+  const selected = new Set(validated.profiles);
+  const lines = [
+    "# Managed by platform-devex repository standards. Do not edit by hand.",
+    `# Provenance: ${CONTRACT_VERSION} / ${policy.version}`,
+  ];
+  for (const profile of policy.profiles) {
+    if (!selected.has(profile.name)) continue;
+    lines.push(`# Profile: ${profile.name}`);
+    for (const exclusion of profile.exclusions) {
+      lines.push(`# ${exclusion.reason}`);
+      lines.push(exclusion.pattern);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 export function applyEditorConfig(current, file, policy) {
   requireThat(current === null || typeof current === "string", "Invalid editorconfig source");
   const section = renderEditorConfig(file, policy);
@@ -264,6 +417,14 @@ export function generateManagedFiles(contract, policyInput, editorConfigs = new 
   for (const file of validated.managedFiles) {
     if (file.type === "checkov") {
       files.push({ path: file.path, content: renderCheckov(file, policies.checkov) });
+      continue;
+    }
+    if (file.type === "sonar") {
+      files.push({ path: file.path, content: renderSonar(file, policies.sonar) });
+      continue;
+    }
+    if (file.type === "eslint") {
+      files.push({ path: file.path, content: renderEslint(file, policies.eslint) });
       continue;
     }
     const paths = new Set([file.path]);
@@ -617,6 +778,10 @@ async function loadPolicy() {
       new URL("../standards/checkov/v1.json", import.meta.url), "utf8")),
     editorconfig: JSON.parse(await readFile(
       new URL("../standards/editorconfig/v1.json", import.meta.url), "utf8")),
+    sonar: JSON.parse(await readFile(
+      new URL("../standards/sonar/v1.json", import.meta.url), "utf8")),
+    eslint: JSON.parse(await readFile(
+      new URL("../standards/eslint/v1.json", import.meta.url), "utf8")),
   };
 }
 
