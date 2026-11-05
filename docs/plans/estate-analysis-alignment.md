@@ -277,7 +277,6 @@ repository.
 | Repository | Target family / disposition |
 | --- | --- |
 | `.github` | Python automation and workflow security; preserve generated estate documentation |
-| `.github-copilot` | TypeScript tooling and workflow security; migrate the instruction/template source too |
 | `41-bovet-street` | Documentation/data applicability exemption; no executable source or workflows observed |
 | `actions` | Mixed JavaScript/Python action/tooling source, workflow security and existing .NET fixtures |
 | `ado-pipeline-templates` | Pipeline/template validation and workflow security; reassess blanket Sonar applicability |
@@ -337,8 +336,7 @@ decision is a blocker, not an exemption.
 | --- | --- |
 | `actions` | Versioned reusable scanner workflows/helpers, result schema, trusted metadata-only merge policy and publication-origin classification |
 | `platform-workloads` | Repository profile selection, applicable feature/configuration projection and repository rulesets |
-| Individual repositories | Thin analysis callers and declared, necessary build/test/source configuration |
-| `.github-copilot` | Human/agent instructions, prompts, alignment/audit guidance and the ops clock |
+| Individual repositories | Thin analysis callers, declared build/test/source configuration, and repository-specific human/agent instructions and prompts |
 | `platform-devex` | Catalog-scoped compliance/freshness reporting, supported on-demand scan requests and finding consumption |
 | `.github` | Existing generated estate visibility, consuming the standard analysis state |
 
@@ -526,7 +524,7 @@ has occurred.
 | Package | Main owner | Prerequisites | Required exit |
 | --- | --- | --- | --- |
 | 0. Scope and behavior baseline | `platform-devex`, `platform-workloads` | None | Complete ledger, capabilities and before-state evidence |
-| 1. Contract and policy | `actions`, `platform-workloads`, `.github-copilot` | 0 | Schemas, profile/check/publication decisions and schedule contract fixed |
+| 1. Contract and policy | `actions`, `platform-workloads` | 0 | Schemas, profile/check/publication decisions and schedule contract fixed |
 | 2. Shared implementation | `actions` | 1 | Tested immutable release with analysis and trusted metadata primitives |
 | 3. Catalog projection and prerequisites | `platform-workloads` | 1, 2 | All scoped profiles/entitlements/credentials/settings ready without unrelated infrastructure changes |
 | 4. Publication protection | Target repositories, `actions` | 0, 2 | All affected privileged routes guarded before merge identity changes |
@@ -721,10 +719,8 @@ follow-up. Complete the cross-repository sweep below and verify generated/served
 | --- | --- |
 | `actions` | README/badges, AGENTS/Copilot guidance, codequality and versioning docs, scanner/coverage/input/result contracts and tested examples |
 | `platform-workloads` | README/AGENTS, architecture, workload schema, developer/prerequisite and onboarding/decommissioning docs, ruleset/profile ownership |
-| `.github-copilot` | Workflow/security/automerge/scheduling instructions; relevant deployment/release instructions; codequality/dependency/security prompts; align/audit/create/failure agents; ops clock and shared action guidance |
-| `.github-copilot` distribution | Rebuild and verify catalog/MCP/packaged instruction distribution so clients cannot keep generating the retired pattern |
 | `platform-devex` | README/AGENTS/Copilot guidance, source/profile configuration, freshness/dispatch/reporting operations and in-flight batch migration guidance |
-| Every applicable target | README/status badges, local AGENTS/instructions, contribution/security/test/coverage/manual-run documentation and copied templates |
+| Every applicable target | README/status badges, local AGENTS/instructions and prompts, contribution/security/test/coverage/manual-run documentation and copied templates |
 | Template repositories | Analysis and merge examples, validation/generation behavior, image publication documentation and supported instantiated-repository behavior |
 | `.github` estate visibility | Update the generator for profile/freshness/result links and regenerate `docs/estate/`; do not edit generated pages by hand |
 | New repository onboarding | One profile selection and released caller; correct rulesets, features, schedules and documentation generated from the same standard |

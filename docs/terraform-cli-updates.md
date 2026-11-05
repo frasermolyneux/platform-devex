@@ -241,10 +241,9 @@ unchanged. Merging pin changes can trigger existing target deployment workflows.
 
 ## Schedule, dry run and urgent operation
 
-The parent rollout has registered **Sunday 00:37 UTC** in
-`.github-copilot/docs/ops-clock.md`, before the per-repository Sunday update
-window. This workflow uses `37 0 * * 0`; this implementation changes only
-`platform-devex`. Ensure the registered clock change has landed before activation.
+This workflow uses **Sunday 00:37 UTC** (`37 0 * * 0`), before the
+per-repository Sunday update window. The schedule is owned directly by
+`platform-devex`; this implementation changes no other repository.
 
 GitHub Actions `on.schedule` in `.github/workflows/terraform-cli-updates.yml` is
 the actual native scheduler, not an ops-clock-document trigger. The owner-approved
