@@ -162,7 +162,7 @@ def guard_job(app_id):
     steps:
       - name: Resolve immutable original origin
         id: origin
-        uses: {GUARD}
+        uses: {GUARD} # {GUARD_TAG}
         with:
           github-token: ${{{{ github.token }}}}
           app-id: '{app_id}'

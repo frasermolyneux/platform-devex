@@ -83,6 +83,7 @@ class TransformationTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertIn("# Original workflow comment", generated)
         self.assertIn("# Original environment approval and ordering", generated)
+        self.assertIn(f"uses: {installer.GUARD} # {installer.GUARD_TAG}", generated)
         self.assertEqual(transform(generated), generated)
 
     def test_original_scalar_if_and_needs_and_inline_comments(self):
