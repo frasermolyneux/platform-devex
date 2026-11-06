@@ -841,11 +841,15 @@ test("disabling the source of a merged batch escalates instead of claiming resol
   }
 });
 
-test("trusted draft PR failures delegate once per SHA and escalate at the cap", async () => {
+test("failed-check delegation is paused without treating checks as passing or losing escalations", async () => {
   const writes = [];
   const sha = "abcd";
   const prComments = [];
   const now = new Date().toISOString();
+  let draft = true;
+  let updatedAt = now;
+  let checks = { total_count: 1, check_runs: [{ status: "completed", conclusion: "failure" }] };
+  let status = { state: "pending", statuses: [] };
   const issue = {
     number: 7, body: '<!-- platform-devex-ci-batch-v1:{"alertIds":["code-scanning:1"]} -->',
     user: { login: "owner" }, created_at: now, state: "open", labels: [{ name: "platform-devex-ci" }],
@@ -866,7 +870,7 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
         event: "cross-referenced", source: { issue: { number: 8, pull_request: {} } },
       }],
       "/repos/owner/repo/pulls/8": {
-        number: 8, state: "open", updated_at: now, draft: true,
+        number: 8, state: "open", updated_at: updatedAt, draft,
         changed_files: 1, additions: 2, deletions: 1,
         user: { login: "copilot-swe-agent[bot]" },
         head: { sha, ref: "copilot/fix", repo: { full_name: "owner/repo" } },
@@ -876,10 +880,8 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
       "/repos/owner/repo/issues/8/comments?per_page=100": prComments,
       "/repos/owner/repo/pulls/8/files?per_page=100": [{ filename: "src/a.js", additions: 2, deletions: 1 }],
       "/repos/owner/repo/compare/main...abcd": { behind_by: 0 },
-      "/repos/owner/repo/commits/abcd/check-runs?per_page=100": {
-        total_count: 1, check_runs: [{ status: "completed", conclusion: "failure" }],
-      },
-      "/repos/owner/repo/commits/abcd/status": { state: "pending", statuses: [] },
+      "/repos/owner/repo/commits/abcd/check-runs?per_page=100": checks,
+      "/repos/owner/repo/commits/abcd/status": status,
     };
     assert.ok(path in result, `unexpected request: ${path}`);
     return Response.json(result[path]);
@@ -892,20 +894,38 @@ test("trusted draft PR failures delegate once per SHA and escalate at the cap", 
   };
   try {
     await main(env);
-    assert.equal(writes.length, 1);
-    assert.equal(writes[0].path, "/repos/owner/repo/issues/8/comments");
-    assert.match(writes[0].body, /<!-- devex-copilot-delegate --><!-- sha:abcd -->/);
-    assertTestingInstructions(writes[0].body);
-    prComments.push({ user: { login: "owner" }, body: writes[0].body });
+    assert.deepEqual(writes, [], "draft check failures do not delegate or hand off");
+    draft = false;
     await main(env);
-    assert.equal(writes.length, 1);
+    assert.deepEqual(writes, [], "non-draft check-run failures do not delegate or hand off");
+    checks = { total_count: 0, check_runs: [] };
+    status = { state: "failure", statuses: [{ context: "legacy", state: "failure" }] };
+    await main(env);
+    assert.deepEqual(writes, [], "non-draft status failures do not delegate or hand off");
+    status = { state: "pending", statuses: [{ context: "legacy", state: "pending" }] };
+    await main(env);
+    assert.deepEqual(writes, [], "pending validation does not hand off");
+    checks = { total_count: 1, check_runs: [{ status: "completed", conclusion: "skipped" }] };
+    status = { state: "pending", statuses: [] };
+    await main(env);
+    assert.deepEqual(writes, [], "all-skipped validation does not hand off");
+
+    draft = true;
+    checks = { total_count: 1, check_runs: [{ status: "completed", conclusion: "failure" }] };
     prComments.splice(0, prComments.length, ...["one", "two", "three"].map((oldSha) => ({
       user: { login: "owner" }, body: `<!-- devex-copilot-delegate --><!-- sha:${oldSha} -->`,
     })));
     await main(env);
-    assert.equal(writes.length, 2);
-    assert.equal(writes[1].path, "/repos/owner/repo/issues/7/comments");
-    assert.match(writes[1].body, /human attention/);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].path, "/repos/owner/repo/issues/7/comments");
+    assert.match(writes[0].body, /exhausted three failed-check fix attempts/);
+    writes.length = 0;
+    prComments.length = 0;
+    updatedAt = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
+    await main(env);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].path, "/repos/owner/repo/issues/7/comments");
+    assert.match(writes[0].body, /has not progressed for 48 hours/);
   } finally {
     globalThis.fetch = previousFetch;
   }

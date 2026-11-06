@@ -27,6 +27,7 @@ const VERIFIED_MARKER = "<!-- platform-devex-ci-verified -->";
 const RERUN_MARKER = "<!-- platform-devex-ci-rerun:";
 const EVIDENCE_REQUEST_MARKER = "<!-- platform-devex-ci-evidence-request:";
 const DELEGATE_MARKER = "<!-- devex-copilot-delegate -->";
+const FAILED_CHECK_DELEGATION_ENABLED = false;
 const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
 const COPILOT_REVIEW_CHECK = "copilot-pull-request-reviewer";
 const COPILOT_COMMENTERS = new Set([
@@ -864,6 +865,10 @@ async function delegateCheckFailure(human, app, repo, issue, pr, sha, prComments
     await escalate(app, repo, issue, `PR #${pr.number} exhausted three failed-check fix attempts`, dryRun, appLogin);
     return;
   }
+  if (!FAILED_CHECK_DELEGATION_ENABLED) {
+    await note(`${repo}#${issue.number}: PR #${pr.number} checks failed; automatic failed-check delegation is paused.`);
+    return;
+  }
   await note(`${repo}#${issue.number}: asking Copilot to fix PR #${pr.number} checks (${attempts.length + 1}/3).`);
   if (!dryRun) await human.request(`/repos/${repo}/issues/${pr.number}/comments`, {
     method: "POST",
@@ -1087,7 +1092,9 @@ async function reconcile(app, human, repo, issue, batch, dryRun, appLogin, enabl
     if (state === "failed" && (pr.draft || !handledBySweep)) {
       await delegateCheckFailure(human, app, repo, issue, pr, sha, prComments, dryRun, appLogin);
     } else {
-      await note(`${repo}#${issue.number}: PR #${pr.number} checks ${state}; waiting for completion or the non-draft failed-check workflow.`);
+      const waiting = state !== "failed" ? "waiting for validation" :
+        FAILED_CHECK_DELEGATION_ENABLED ? "waiting for the non-draft failed-check workflow" : "automatic failed-check delegation is paused";
+      await note(`${repo}#${issue.number}: PR #${pr.number} checks ${state}; ${waiting}.`);
     }
     return;
   }

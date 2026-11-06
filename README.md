@@ -52,15 +52,17 @@ changes remain blocked until every applicable route has genuine acceptance.
 
 ## What it does
 
-Three independent workflows run every 30 minutes on staggered schedules, or on demand via
-`workflow_dispatch`. Each discovers the repositories where the shared frasermolyneux GitHub App is
+Three independent maintenance workflows are configured on staggered 30-minute schedules and
+support `workflow_dispatch`; the failed-check delegation workflow is currently disabled in GitHub.
+Each discovers the repositories where the shared frasermolyneux GitHub App is
 installed, mints a fresh repository-scoped token per matrix job, and runs a local composite action
 from `.github/actions/`:
 
 - `.github/workflows/stale-branches.yml` runs `stale-branch-sweep`, which updates **all** open pull
   request branches that are behind their base branch, whether or not auto-merge is enabled. This
   also unsticks Dependabot PRs that are "out-of-date with base branch"; it does not merge PRs.
-- `.github/workflows/delegate-failed-checks.yml` runs `delegate-failed-checks`, which comments
+- `.github/workflows/delegate-failed-checks.yml` is disabled during the GitHub native
+  Agent Merge / Watch and fix trial. When enabled, it runs `delegate-failed-checks`, which comments
   `@copilot investigate and resolve the failed checks on this pull request` once per failing
   commit SHA on an open, non-draft **automated** PR: either Copilot-authored on a `copilot/`
   branch (including continuous-improvement batches), or Dependabot-authored on a `dependabot/`
@@ -209,9 +211,13 @@ with an App-authored reservation on the batch issue before each API call. Active
 approval-required runs are left alone. Obsolete cancelled contexts may be ignored only when
 the same workflow has a newer successful event; real passing checks and GitHub merge
 requirements still apply. Unmappable cancellations, uncertain retry outcomes and exhausted
-budgets escalate to a human. It handles failed checks on drafts and non-draft
-failures outside the sweep's check-run criteria (at most three attempts); the separate
-failed-check workflow handles non-draft check-run failures. After real validation passes, it
+budgets escalate to a human. Automatic failed-check delegation from the controller is paused
+for both draft and non-draft PRs, independently of the disabled failed-check workflow.
+Failed, pending and skipped checks do not become passing, existing failed-check attempt-cap
+and stalled-PR escalations remain in effect, and other repair paths remain active. To reverse
+the controller pause, change `FAILED_CHECK_DELEGATION_ENABLED` in
+`scripts/continuous-improvement.mjs` to `true`; re-enabling the separate workflow is an
+independent GitHub setting. After real validation passes, the controller
 requests a review of the latest commit from Copilot using the entitled human PAT, delegates verified
 code/test defects at most twice, and escalates stalled, oversized, CI-changing or unresolved work.
 Same-head review requests are separately capped at four so repeated verified

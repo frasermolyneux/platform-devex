@@ -4,13 +4,14 @@
 
 This repository hosts scheduled internal-developer-platform automation, with a small Node.js
 controller for continuous improvement rather than target-application code. Three independent
-maintenance workflows discover every repository the shared frasermolyneux GitHub App is installed
+maintenance workflows are configured to discover every repository the shared frasermolyneux GitHub App is installed
 on and run locally vendored composite actions against each:
 
 - **stale-branch-sweep** — updates the head branch of every open pull request that is behind its
   base branch, regardless of auto-merge status (also unsticks Dependabot PRs stuck
   "out-of-date with base branch"; does not merge them).
-- **delegate-failed-checks** — comments `@copilot investigate and resolve the failed checks on
+- **delegate-failed-checks** — currently disabled in GitHub during the native Agent Merge /
+  Watch and fix trial. When enabled, it comments `@copilot investigate and resolve the failed checks on
   this pull request` once per failing commit SHA on open, non-draft pull requests with failing
   checks only when authored by Copilot on a `copilot/` branch (including improvement batches)
   or by Dependabot on a `dependabot/` branch, with both head and base in the target repository.
@@ -195,9 +196,11 @@ workflows are on the default branch, `gh workflow run` / `gh run watch` against 
   workflow; real checks and merge requirements still gate handoff. Unmapped cancellations,
   uncertain retry outcomes and exhausted budgets require human attention. Recheck the
   PR SHA, branch freshness and GitHub merge requirements before handing off for human review.
-  Draft PR check failures and non-draft failures outside the sweep's check-run criteria get up
-  to three same-SHA deduplicated human-PAT mentions; the separate failed-check action handles
-  non-draft check-run failures. Request Copilot reviews after passing validation using the
+  Automatic failed-check delegation is paused for draft and non-draft PRs using
+  `FAILED_CHECK_DELEGATION_ENABLED` in `scripts/continuous-improvement.mjs`; the separate
+  failed-check workflow is also disabled in GitHub. Existing attempt-cap and stale-PR human
+  escalation remain in effect. Neither pause changes check or merge gates, cancellation
+  recovery, or review/coverage/Sonar repairs. Request Copilot reviews after passing validation using the
   entitled human PAT, not the App token (which can silently ignore a successful request).
   Verify a new human-authored Copilot review-request timeline event before writing the per-head
   marker; legacy App-request markers must not suppress a verified request. Publish authenticated,
