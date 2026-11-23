@@ -3,13 +3,14 @@
 [![Approve Trusted Pending Workflow Runs](https://github.com/frasermolyneux/platform-devex/actions/workflows/approve-copilot-runs.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/approve-copilot-runs.yml)
 [![Continuous Improvement](https://github.com/frasermolyneux/platform-devex/actions/workflows/continuous-improvement.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/continuous-improvement.yml)
 [![Delegate Failed Pull Request Checks](https://github.com/frasermolyneux/platform-devex/actions/workflows/delegate-failed-checks.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/delegate-failed-checks.yml)
+[![Audit Shared HTTP Ingress Contract](https://github.com/frasermolyneux/platform-devex/actions/workflows/http-ingress-contract.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/http-ingress-contract.yml)
 [![Publication installer tests](https://github.com/frasermolyneux/platform-devex/actions/workflows/publication-installer-tests.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/publication-installer-tests.yml)
 [![Sweep Stale Pull Request Branches](https://github.com/frasermolyneux/platform-devex/actions/workflows/stale-branches.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/stale-branches.yml)
 [![Reviewed Terraform CLI Updates](https://github.com/frasermolyneux/platform-devex/actions/workflows/terraform-cli-updates.yml/badge.svg)](https://github.com/frasermolyneux/platform-devex/actions/workflows/terraform-cli-updates.yml)
 
 Internal developer platform automation: separate maintenance workflows for PR branch updates,
-Copilot delegation and trusted pending workflow runs, plus opt-in continuous improvement across
-frasermolyneux repositories.
+Copilot delegation and trusted pending workflow runs, a read-only shared HTTP ingress contract
+audit, plus opt-in continuous improvement across frasermolyneux repositories.
 
 ## Documentation
 
@@ -97,6 +98,14 @@ activity or failure results per repository and posts one run-specific comment to
 `platform-devex` "Self-heal activity log" issue; quiet successful runs post nothing, while
 incomplete runs are called out explicitly. Separate concurrency groups prevent overlapping runs of the same workflow without blocking the
 other two.
+
+`.github/workflows/http-ingress-contract.yml` runs hourly and on manual dispatch. It verifies
+that the baremetal consumer's catalog copy matches its exact pinned `platform-workloads`
+source, then reports duplicate hostname owners, invalid aliases, and private DNS/private-route
+drift. It uses read-only, one-repository-scoped App tokens and GitHub API metadata only; it
+does not check out target code, assert live routing or renderer adoption, change configuration,
+gate deployments, or authorize cutover. Findings are reported to the existing self-heal activity
+log; an incomplete API collection is reported separately.
 
 ### Opt-in continuous improvement
 
@@ -366,9 +375,11 @@ aborts, so remove or replace the secret rather than leaving a revoked value in p
 gh workflow run stale-branches.yml --repo frasermolyneux/platform-devex
 gh workflow run delegate-failed-checks.yml --repo frasermolyneux/platform-devex
 gh workflow run approve-copilot-runs.yml --repo frasermolyneux/platform-devex
+gh workflow run http-ingress-contract.yml --repo frasermolyneux/platform-devex
 gh workflow run continuous-improvement.yml -f mode=reconcile -f dry_run=true --repo frasermolyneux/platform-devex
 gh run list --workflow stale-branches.yml --repo frasermolyneux/platform-devex --limit 5
 gh run list --workflow delegate-failed-checks.yml --repo frasermolyneux/platform-devex --limit 5
 gh run list --workflow approve-copilot-runs.yml --repo frasermolyneux/platform-devex --limit 5
+gh run list --workflow http-ingress-contract.yml --repo frasermolyneux/platform-devex --limit 5
 gh run list --workflow continuous-improvement.yml --repo frasermolyneux/platform-devex --limit 5
 ```
