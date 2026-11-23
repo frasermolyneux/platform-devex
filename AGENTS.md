@@ -40,6 +40,9 @@ on and run locally vendored composite actions against each:
   one run-specific comment on this repository's "Self-heal activity log" tracking issue, using
   the default `github.token` (not the App token) since it only ever writes to this repository.
 
+A separate read-only HTTP ingress contract audit checks the pinned platform-workloads catalog
+and platform-baremetal consumer.
+
 `.github/workflows/continuous-improvement.yml` separately scans GitHub security and quality
 alerts for explicitly opted-in repositories daily, reconciles existing batches hourly, and
 leaves final PR review and merge to a human. It uses `scripts/continuous-improvement.mjs` and
@@ -60,6 +63,15 @@ The reconcile matrix mints its own exact-permission installation token from
 `GH_APP_ID`, `GH_APP_INSTALLATION_ID` and `GH_APP_PEM`; target tokens request only exact
 Contents and Pull requests access. The App does not need Variables permission.
 
+`.github/workflows/http-ingress-contract.yml` and `scripts/http-ingress-contract.mjs` audit the
+shared HTTP ingress catalog against the baremetal consumer's exact pinned source record. The
+audit validates duplicate hostname ownership, direct canonical aliases, private-route metadata
+and the private DNS baseline using API metadata/blobs only. Findings are report-only and go to
+the existing self-heal activity log; the audit does not assert live routing or renderer adoption,
+gate a deployment or authorize a cutover. The workflow uses separate exact-repository Contents:
+read tokens for `platform-workloads` and `platform-baremetal`, and never checks out or executes
+either target repository.
+
 The repository itself is provisioned through `platform-workloads` (catalog entry
 `terraform/workloads/platform/platform-devex.json`); do not add Terraform here.
 
@@ -71,10 +83,12 @@ The repository itself is provisioned through `platform-workloads` (catalog entry
   `.github/actions/delegate-failed-checks/action.yml` per repository.
 - `.github/workflows/approve-copilot-runs.yml` — discovers installation repositories and runs
   `.github/actions/approve-copilot-workflow-runs/action.yml` per repository.
+- `.github/workflows/http-ingress-contract.yml` — report-only audit of the pinned shared ingress contract.
 - `.github/workflows/continuous-improvement.yml` — opt-in daily intake and hourly reconciliation.
 - `.github/workflows/repository-standards.yml` — managed repository-file pull-request reconciliation.
 - `scripts/continuous-improvement.mjs` — Copilot SDK triage, linked issue/PR reconciliation,
   bounded review fixes and human escalation.
+- `scripts/http-ingress-contract.mjs` — read-only shared HTTP ingress catalog/consumer audit.
 - `scripts/repository-standards.mjs` — generic managed-files contract, rendering and safe PR controller.
 - `standards/checkov/v1.json` — canonical approved Checkov profiles and rules.
 - `standards/editorconfig/v1.json` — canonical curated low-noise Roslyn diagnostic policy.
@@ -86,6 +100,7 @@ The repository itself is provisioned through `platform-workloads` (catalog entry
 gh workflow run stale-branches.yml
 gh workflow run delegate-failed-checks.yml
 gh workflow run approve-copilot-runs.yml
+gh workflow run http-ingress-contract.yml
 gh workflow run continuous-improvement.yml -f mode=intake -f dry_run=true
 gh workflow run repository-standards.yml -f repository=platform-status-web -f dry_run=true
 gh run list --workflow stale-branches.yml --limit 5

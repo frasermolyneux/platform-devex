@@ -1,0 +1,177 @@
+name: Audit Shared HTTP Ingress Contract
+
+on:
+  schedule:
+    - cron: "47 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: http-ingress-contract
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      result: ${{ steps.audit.outcome }}
+    steps:
+      - name: Require reviewed default branch
+        env:
+          RUN_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          node --input-type=module -e '
+            if (!process.env.DEFAULT_BRANCH || process.env.RUN_REF !== `refs/heads/${process.env.DEFAULT_BRANCH}`) {
+              throw new Error("HTTP ingress contract audit requires the reviewed default branch");
+            }
+          '
+
+      - name: Check out trusted controller
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Create read-only platform-workloads token
+        id: workloads-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: platform-workloads
+          permission-contents: read
+
+      - name: Create read-only platform-baremetal token
+        id: baremetal-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PEM }}
+          owner: ${{ github.repository_owner }}
+          repositories: platform-baremetal
+          permission-contents: read
+
+      - name: Audit the pinned catalog and consumer contract
+        id: audit
+        run: node scripts/http-ingress-contract.mjs
+        env:
+          WORKLOADS_TOKEN: ${{ steps.workloads-token.outputs.token }}
+          BAREMETAL_TOKEN: ${{ steps.baremetal-token.outputs.token }}
+
+      - name: Ensure metadata-only result
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          WORKLOADS_TOKEN_OUTCOME: ${{ steps.workloads-token.outcome }}
+          BAREMETAL_TOKEN_OUTCOME: ${{ steps.baremetal-token.outcome }}
+        run: |
+          if [[ ! -f http-ingress-contract-result.json ]]; then
+            jq -n \
+              --arg audit "$AUDIT_OUTCOME" \
+              --arg workloadsToken "$WORKLOADS_TOKEN_OUTCOME" \
+              --arg baremetalToken "$BAREMETAL_TOKEN_OUTCOME" \
+              '{
+                status: "incomplete",
+                error: (if $workloadsToken != "success" or $baremetalToken != "success"
+                  then "repository-token-issuance-failed"
+                  else "ingress-contract-audit-failed"
+                  end),
+                auditOutcome: $audit,
+                workloadsTokenOutcome: $workloadsToken,
+                baremetalTokenOutcome: $baremetalToken
+              }' > http-ingress-contract-result.json
+          fi
+
+      - name: Upload audit result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: http-ingress-contract-result
+          path: http-ingress-contract-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+  summarize:
+    needs: audit
+    if: always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Download audit result
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: http-ingress-contract-result
+          path: results
+
+      - name: Report findings and incomplete collection
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          AUDIT: ${{ needs.audit.result }}
+          DOWNLOAD: ${{ steps.download.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          file=results/http-ingress-contract-result.json
+          incomplete=false
+          if [[ ! -f "$file" || "$AUDIT" != success || "$DOWNLOAD" != success ]] ||
+            jq -e '.status == "incomplete"' "$file" >/dev/null 2>&1; then
+            incomplete=true
+          fi
+
+          activity=$incomplete
+          if [[ -f "$file" ]] && jq -e '.status != "current"' "$file" >/dev/null; then
+            activity=true
+          fi
+          if [[ "$activity" == false ]]; then
+            echo "The pinned catalog copy and declared contract invariants are current; live routing and renderer adoption are not asserted."
+            exit 0
+          fi
+
+          {
+            echo "## Shared HTTP ingress contract"
+            echo ""
+            echo "[Run]($RUN_URL) — incomplete: $incomplete."
+            echo ""
+            if [[ -f "$file" ]]; then
+              jq -r '"Status: **" + (.status // "unknown") + "**; source: `" + (.sourceRevision // "unavailable") + "`; consumer revision: `" + (.consumerRevision // "unavailable") + "`."' "$file"
+              echo ""
+              if jq -e '.findings | length > 0' "$file" >/dev/null 2>&1; then
+                echo "| Source | Check | Host | Finding |"
+                echo "| --- | --- | --- | --- |"
+                jq -r '.findings[] | "| " + (.source // "pinned-source") + " | " + .code + " | " + (.hostname // "—") + " | " + .message + " |"' "$file"
+                echo ""
+              fi
+            else
+              echo "No complete metadata result was collected; inspect the run for failed API or token steps."
+            fi
+            echo ""
+            echo "This report is read-only. Findings do not gate deployments or authorize cutover."
+          } | tee -a "$GITHUB_STEP_SUMMARY" > http-ingress-contract-summary.md
+
+          issue=$(gh issue list --repo "$REPOSITORY" --search "Self-heal activity log in:title" --state open --json number --jq '.[0].number // empty')
+          if [[ -z "$issue" ]]; then
+            issue=$(gh api "repos/$REPOSITORY/issues" -f title="Self-heal activity log" -f body="Scheduled maintenance activity and incomplete runs." --jq '.number')
+          fi
+          gh issue comment "$issue" --repo "$REPOSITORY" --body-file http-ingress-contract-summary.md
+          [[ "$incomplete" == false ]]
